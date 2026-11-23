@@ -89,7 +89,44 @@ export const PARKING_DAMAGE_REQUIRED_KINDS = ["photo", "estimate"] as const sati
 
 export const Readability = z.enum(["legible", "partial", "illegible"]);
 
-export const Position = z.enum(["front", "rear", "left", "right", "unknown"]);
+/** Seen from the vehicle (driving direction), not from the camera: on a front photo, the vehicle's left is on the image's right. */
+export const Position = z.enum([
+  "front",
+  "rear",
+  "left",
+  "right",
+  "front_left",
+  "front_right",
+  "rear_left",
+  "rear_right",
+  "roof",
+  "underbody",
+  "unknown",
+]);
+export type Position = z.infer<typeof Position>;
+
+const ALL_DIRECTIONS = ["front", "rear", "left", "right", "roof", "underbody"] as const;
+type Direction = (typeof ALL_DIRECTIONS)[number];
+
+/** Each position is a set of base directions; a corner covers both of its sides, unknown covers everything. */
+export const POSITION_DIRECTIONS: Record<Position, readonly Direction[]> = {
+  front: ["front"],
+  rear: ["rear"],
+  left: ["left"],
+  right: ["right"],
+  front_left: ["front", "left"],
+  front_right: ["front", "right"],
+  rear_left: ["rear", "left"],
+  rear_right: ["rear", "right"],
+  roof: ["roof"],
+  underbody: ["underbody"],
+  unknown: ALL_DIRECTIONS,
+};
+
+/** Two positions can describe the same damage iff their direction sets overlap. No overlap = candidate conflict. */
+export const positionsOverlap = (a: Position, b: Position) =>
+  POSITION_DIRECTIONS[a].some((d) => POSITION_DIRECTIONS[b].includes(d));
+
 // damagedArea is normalized as "<part>:<position>", e.g. "bumper:front"; an unclear angle is "unknown".
 const DAMAGED_AREA = new RegExp(`^[a-z_]+:(${Position.options.join("|")})$`);
 

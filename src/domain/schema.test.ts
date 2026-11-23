@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ClaimFiling, Finding, ProposedObservation } from "./schema.ts";
+import { ClaimFiling, Finding, ProposedObservation, positionsOverlap } from "./schema.ts";
 import { FIXTURES } from "../../fixtures/manifest.ts";
 
 const id = "00000000-0000-4000-8000-000000000001";
@@ -33,6 +33,15 @@ test("damagedArea is normalized as part:position", () => {
   assert.equal(ProposedObservation.safeParse({ ...base, normalized: "front bumper" }).success, false);
   assert.equal(ProposedObservation.safeParse({ ...base, normalized: "bumper:unknown" }).success, true);
   assert.equal(ProposedObservation.safeParse({ ...base, value: null, normalized: null }).success, true);
+});
+
+test("positions conflict only when their directions do not overlap", () => {
+  assert.equal(positionsOverlap("front", "rear"), false); // the demo conflict
+  assert.equal(positionsOverlap("front", "front_left"), true); // corner vs side: same damage possible
+  assert.equal(positionsOverlap("front_left", "rear_left"), true); // both touch the left side
+  assert.equal(positionsOverlap("front_left", "rear_right"), false);
+  assert.equal(positionsOverlap("roof", "underbody"), false);
+  assert.equal(positionsOverlap("unknown", "rear"), true); // unknown never creates a conflict
 });
 
 test("a conflict cites two different sources", () => {

@@ -60,7 +60,9 @@ export const FIXTURES = z.array(Fixture).parse([
   },
   {
     id: "F6-stale-approval",
-    title: "New evidence arrives after approval but before dispatch",
+    // The new evidence is deliberately consistent (an extra photo of the same damage), so this fixture
+    // tests stale-approval rejection only, not conflict detection.
+    title: "Consistent new evidence arrives after approval but before dispatch",
     route: ["awaiting_approval", "submitting", "awaiting_approval"],
     expectedFindings: [],
     allowedSideEffects: ["prepare_filing"],
