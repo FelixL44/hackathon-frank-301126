@@ -24,7 +24,9 @@ export type NewArtifact = { sourceId: string; kind: ArtifactKind; mediaType: str
 export type Extractor = {
   name: string;
   promptVersion?: string;
-  extract(artifact: NewArtifact): Promise<{ observations: ProposedObservation[]; attempts: number }>;
+  extract(
+    artifact: NewArtifact,
+  ): Promise<{ observations: ProposedObservation[]; attempts: number; costEur?: number; model?: string }>;
 };
 
 /** Findings that recompute() derives from observations; everything else (e.g. invalid_extraction) persists. */
@@ -110,6 +112,8 @@ export async function openCase(
       }
       await logEvent(db, c, "extract", {
         ...run,
+        tool: result.model ?? run.tool, // the model that actually answered, e.g. after a fallback
+        costEur: result.costEur ?? null,
         latencyMs: Date.now() - started,
         detail: { sourceId: a.sourceId, observations: proposed.length, attempts: result.attempts },
       });
@@ -129,6 +133,7 @@ export async function openCase(
         ...run,
         result: "error",
         errorCategory: category,
+        costEur: e instanceof ExtractionError ? e.costEur : null,
         latencyMs: Date.now() - started,
         detail: { sourceId: a.sourceId, attempts: e instanceof ExtractionError ? e.attempts : null },
       });

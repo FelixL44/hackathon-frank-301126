@@ -1,11 +1,18 @@
 import { anthropicProvider } from "./anthropic.ts";
 import { openaiProvider } from "./openai.ts";
+import { usdPerMTok } from "./pricing.ts";
 import type { ModelProvider } from "./provider.ts";
 
 export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5";
 
 /** Reads MODEL_PROVIDER / MODEL_ID / MODEL_BASE_URL. Returns null when no model is configured (fixture mode). */
 export function providerFromEnv(env: Record<string, string | undefined> = process.env): ModelProvider | null {
+  const provider = select(env);
+  if (provider) usdPerMTok(provider.kind, provider.id.slice(provider.kind.length + 1), env); // no price → fail before spending
+  return provider;
+}
+
+function select(env: Record<string, string | undefined>): ModelProvider | null {
   const provider = env.MODEL_PROVIDER?.trim();
   if (!provider) return null;
   if (provider === "anthropic") return anthropicProvider(env.MODEL_ID || DEFAULT_ANTHROPIC_MODEL);

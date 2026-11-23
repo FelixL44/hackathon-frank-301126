@@ -82,7 +82,8 @@ The extractor talks to one small port (`src/model/provider.ts`) with two adapter
 - PDFs: Claude receives the file itself plus its text layer; OpenAI-compatible servers receive the text layer only. Scanned PDFs without a text layer therefore need Claude.
 - Every extraction event records provider, model, prompt version, attempts and latency. The UI header shows which extractor is active.
 - Without `MODEL_PROVIDER` the app uses the fixtures' pre-extracted observations, so it runs without any key.
-- Claude requests opt into server-side refusal fallback (`fallbacks: "default"`).
+- Claude requests opt into server-side refusal fallback (`fallbacks: "default"`). Events record the model that actually answered.
+- **Daily budget** (`MODEL_DAILY_BUDGET_EUR`, default 1 €): every extraction event stores its cost. Before a new case starts, the app sums today's spend (Lisbon day). Once the budget is reached it uses fixture data and says so in the header. Claude prices are built in, local models cost 0, and OpenAI needs `MODEL_PRICE_USD_PER_MTOK`. The budget is counted per database, so each local PGlite has its own. `npm run model:smoke` is not counted.
 - Keys stay on the server. One model configuration per deployment; per-tenant keys come later.
 
 ### 3. Database and storage
@@ -126,6 +127,8 @@ evals/                         (planned, HAC-14) live model evaluation runner an
 | `MODEL_ID` | for `openai*` | Model name at that provider; Anthropic defaults to `claude-opus-5-5` |
 | `MODEL_BASE_URL` | for `openai-compatible` | For example `http://localhost:11434/v1` for Ollama |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | for that provider | Server-side only |
+| `MODEL_DAILY_BUDGET_EUR` | no (default `1`) | Model spend per Lisbon day before the app falls back to fixture data |
+| `MODEL_PRICE_USD_PER_MTOK` | for `openai` | `<input>,<output>` USD per million tokens from the provider's price list; overrides built-in prices |
 | `STORAGE_DRIVER`, `S3_*` | (planned, deployment) | S3-compatible private bucket |
 | `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | for Slack | Broker notifications |
 

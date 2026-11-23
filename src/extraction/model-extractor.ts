@@ -1,5 +1,6 @@
 // Model-backed extractor: read the evidence, ask the model, keep only grounded observations, retry within budget.
 import { extractText } from "unpdf";
+import { costEur } from "../model/pricing.ts";
 import { ModelRefusal, type ModelProvider } from "../model/provider.ts";
 import { readObject } from "../storage/objects.ts";
 import type { Extractor, NewArtifact } from "../workflow/cases.ts";
@@ -14,11 +15,13 @@ export type ExtractionFailure = "missing_object" | "invalid_output" | "refusal" 
 export class ExtractionError extends Error {
   readonly category: ExtractionFailure;
   readonly attempts: number;
-  constructor(category: ExtractionFailure, message: string, attempts: number) {
+  readonly costEur: number; // failed attempts cost money too; it still counts toward the daily budget
+  constructor(category: ExtractionFailure, message: string, attempts: number, costEur = 0) {
     super(message);
     this.name = "ExtractionError";
     this.category = category;
     this.attempts = attempts;
+    this.costEur = costEur;
   }
 }
 
@@ -51,25 +54,27 @@ export function modelExtractor(provider: ModelProvider, read: (key: string) => P
       };
 
       let errors: string[] = [];
+      let spent = 0;
+      let model = provider.id;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const feedback = errors.length
           ? `\n\nYour previous answer was rejected:\n- ${errors.join("\n- ")}\nReturn the complete corrected JSON.`
           : "";
-        let raw: unknown = null;
+        let answer;
         try {
-          raw = await provider.extract({ ...request, text: request.text + feedback }, ModelOutput);
+          answer = await provider.extract({ ...request, text: request.text + feedback }, ModelOutput);
         } catch (e) {
-          if (e instanceof ModelRefusal) throw new ExtractionError("refusal", e.message, attempt);
-          // Malformed JSON is invalid output (retried below); anything else already went through the SDK's own retries.
-          if (!(e instanceof SyntaxError)) {
-            throw new ExtractionError("provider_error", e instanceof Error ? e.message : String(e), attempt);
-          }
+          // shortcut: a refused or failed call is not priced (its usage is not returned); small next to the budget.
+          const category = e instanceof ModelRefusal ? "refusal" : "provider_error";
+          throw new ExtractionError(category, e instanceof Error ? e.message : String(e), attempt, spent);
         }
-        const grounded = groundObservations(artifact, pages, raw);
-        if (grounded.ok) return { observations: grounded.observations, attempts: attempt };
+        spent += costEur(provider.kind, answer.model, answer);
+        model = `${provider.kind}:${answer.model}`;
+        const grounded = groundObservations(artifact, pages, answer.output);
+        if (grounded.ok) return { observations: grounded.observations, attempts: attempt, costEur: spent, model };
         errors = grounded.errors;
       }
-      throw new ExtractionError("invalid_output", errors.join("; "), MAX_ATTEMPTS);
+      throw new ExtractionError("invalid_output", errors.join("; "), MAX_ATTEMPTS, spent);
     },
   };
 }

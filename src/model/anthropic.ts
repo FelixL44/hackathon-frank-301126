@@ -2,7 +2,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { z } from "zod";
-import { base64, ModelRefusal, type ModelProvider, type ModelRequest } from "./provider.ts";
+import { base64, ModelRefusal, type ModelAnswer, type ModelProvider, type ModelRequest } from "./provider.ts";
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
@@ -11,7 +11,8 @@ export function anthropicProvider(model: string): ModelProvider {
 
   return {
     id: `anthropic:${model}`,
-    async extract(req: ModelRequest, schema: z.ZodType) {
+    kind: "anthropic",
+    async extract(req: ModelRequest, schema: z.ZodType): Promise<ModelAnswer> {
       const content: Anthropic.Beta.BetaContentBlockParam[] = [];
       if (req.pdf) {
         content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64(req.pdf) } });
@@ -37,7 +38,12 @@ export function anthropicProvider(model: string): ModelProvider {
       if (response.stop_reason === "refusal") {
         throw new ModelRefusal(`refused: ${response.stop_details?.category ?? "unspecified"}`);
       }
-      return response.parsed_output;
+      return {
+        output: response.parsed_output,
+        model: response.model,
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      };
     },
   };
 }

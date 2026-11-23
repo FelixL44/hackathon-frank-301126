@@ -11,7 +11,8 @@ import { approve, openCase, WorkflowError } from "../workflow/cases.ts";
 
 export async function launchFixture(form: FormData) {
   const fixtureId = z.enum(Object.keys(FIXTURE_CASES) as [string, ...string[]]).parse(form.get("fixtureId"));
-  const id = await openCase(await getDb(), FIXTURE_CASES[fixtureId]!, extractorFor(fixtureId));
+  const db = await getDb();
+  const id = await openCase(db, FIXTURE_CASES[fixtureId]!, await extractorFor(db, fixtureId));
   revalidatePath("/");
   redirect(`/cases/${id}`);
 }

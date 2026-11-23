@@ -20,16 +20,17 @@ const obs = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** Replays canned answers and records what it was asked. */
+/** Replays canned answers as Claude Opus 5.5 with 10k input / 1k output tokens per call, and records the prompts. */
 const fakeProvider = (...answers: unknown[]) => {
   const requests: string[] = [];
   const provider: ModelProvider = {
-    id: "fake:test",
+    id: "anthropic:claude-opus-5-5",
+    kind: "anthropic",
     async extract(req) {
       requests.push(req.text);
       const next = answers.shift();
       if (next instanceof Error) throw next;
-      return next;
+      return { output: next, model: "claude-opus-5-5", inputTokens: 10_000, outputTokens: 1_000 };
     },
   };
   return { provider, requests };
@@ -58,9 +59,19 @@ test("an invented quote is sent back with the reason and fixed on retry", async 
     { observations: [obs({ quote: "para-choques traseiro" })] },
     { observations: [obs()] },
   );
-  const { attempts } = await modelExtractor(provider).extract(message);
+  const { attempts, costEur } = await modelExtractor(provider).extract(message);
   assert.equal(attempts, 2);
   assert.match(requests[1]!, /does not occur on page 1/);
+  // both calls count: 2 × (10k × $4 + 1k × $20) / 1M × 0.95 €/$ = 0.114 €
+  assert.ok(Math.abs(costEur! - 0.114) < 1e-9, String(costEur));
+});
+
+test("a failed extraction still reports what its attempts cost", async () => {
+  const bad = { observations: [obs({ quote: null, page: null })] };
+  const { provider } = fakeProvider(bad, bad, bad);
+  await assert.rejects(modelExtractor(provider).extract(message), (e: unknown) => {
+    return e instanceof ExtractionError && Math.abs(e.costEur - 0.171) < 1e-9;
+  });
 });
 
 test("a missing locator exhausts the budget and fails as invalid_output", async () => {

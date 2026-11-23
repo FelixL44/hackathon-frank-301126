@@ -2,7 +2,7 @@
 // PDFs travel as their text layer inside the prompt: local servers do not accept PDF files.
 import OpenAI from "openai";
 import { z } from "zod";
-import { base64, ModelRefusal, type ModelProvider, type ModelRequest } from "./provider.ts";
+import { base64, ModelRefusal, type ModelAnswer, type ModelProvider, type ModelRequest } from "./provider.ts";
 
 export function openaiProvider(opts: {
   kind: "openai" | "openai-compatible";
@@ -15,7 +15,8 @@ export function openaiProvider(opts: {
 
   return {
     id: `${opts.kind}:${opts.model}`,
-    async extract(req: ModelRequest, schema: z.ZodType) {
+    kind: opts.kind,
+    async extract(req: ModelRequest, schema: z.ZodType): Promise<ModelAnswer> {
       const content: OpenAI.Chat.ChatCompletionContentPart[] = [{ type: "text", text: req.text }];
       if (req.image) {
         content.push({ type: "image_url", image_url: { url: `data:${req.image.mediaType};base64,${base64(req.image.data)}` } });
@@ -33,7 +34,16 @@ export function openaiProvider(opts: {
       if (choice?.message.refusal || choice?.finish_reason === "content_filter") {
         throw new ModelRefusal(`refused: ${choice.message.refusal ?? "content_filter"}`);
       }
-      return JSON.parse(choice?.message.content ?? "null"); // a SyntaxError counts as invalid output and is retried
+      let output: unknown = null; // malformed JSON stays null: invalid output, retried, and its tokens still count
+      try {
+        output = JSON.parse(choice?.message.content ?? "null");
+      } catch {}
+      return {
+        output,
+        model: response.model,
+        inputTokens: response.usage?.prompt_tokens ?? 0,
+        outputTokens: response.usage?.completion_tokens ?? 0,
+      };
     },
   };
 }

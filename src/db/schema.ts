@@ -4,6 +4,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  doublePrecision,
   foreignKey,
   integer,
   jsonb,
@@ -179,6 +180,7 @@ export const events = pgTable("events", {
   result: text("result", { enum: ["ok", "error", "retry"] }).notNull(),
   errorCategory: text("error_category"),
   latencyMs: integer("latency_ms"),
+  costEur: doublePrecision("cost_eur"), // model spend of this operation; summed per Lisbon day for the budget guard
   detail: jsonb("detail").$type<Record<string, unknown>>(),
   createdAt: createdAt(),
 }).enableRLS();
