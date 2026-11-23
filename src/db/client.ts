@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
@@ -23,7 +25,9 @@ export async function openDb(
     const db = drizzlePostgres(client, { schema });
     return { db, migrate: () => migratePostgres(db, { migrationsFolder }), close: () => client.end() };
   }
-  const client = new PGlite(env.PGLITE_DIR ?? ".data/pglite");
+  const dir = env.PGLITE_DIR ?? ".data/pglite";
+  if (!dir.includes("://")) mkdirSync(dirname(dir), { recursive: true }); // PGlite creates only the last segment
+  const client = new PGlite(dir);
   const db = drizzlePglite(client, { schema });
   return { db, migrate: () => migratePglite(db, { migrationsFolder }), close: () => client.close() };
 }

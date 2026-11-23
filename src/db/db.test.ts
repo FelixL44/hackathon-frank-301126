@@ -1,5 +1,8 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { eq } from "drizzle-orm";
@@ -96,6 +99,17 @@ test("failed transaction leaves no partial state", async () => {
     }),
   );
   assert.equal((await db.select().from(cases).where(eq(cases.reference, "CLM-TX"))).length, 0);
+});
+
+test("file-backed PGlite creates missing parent dirs and keeps data across restarts", async () => {
+  const dir = join(await mkdtemp(join(tmpdir(), "claims-")), "nested", "pglite");
+  const first = await openDb({ PGLITE_DIR: dir });
+  await first.migrate();
+  await first.db.insert(cases).values({ reference: "CLM-DISK", replyToken: "token-CLM-DISK-0123456789" });
+  await first.close();
+  const second = await openDb({ PGLITE_DIR: dir });
+  assert.equal((await second.db.select().from(cases)).length, 1);
+  await second.close();
 });
 
 // Exercises the DATABASE_URL path (postgres.js over the wire) without Docker: PGlite serves the Postgres protocol.
