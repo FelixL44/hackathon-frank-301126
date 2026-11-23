@@ -30,6 +30,7 @@ export type Case = z.infer<typeof Case>;
 // ── Artifacts and evidence references ───────────────────────────────────────
 
 export const ArtifactKind = z.enum(["message", "photo", "estimate"]);
+export type ArtifactKind = z.infer<typeof ArtifactKind>;
 
 /**
  * One version of one source. A corrected estimate keeps the same `sourceId`,

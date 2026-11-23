@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
@@ -11,17 +11,19 @@ import * as schema from "./schema.ts";
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-const migrationsFolder = new URL("../../drizzle", import.meta.url).pathname;
+// Resolved from the repo root, where every npm script runs. (new URL(..., import.meta.url) would be bundled by Next.)
+const migrationsFolder = resolve("drizzle");
 
 /**
  * DATABASE_URL set → any Postgres host. Unset → embedded PGlite, persisted in PGLITE_DIR
  * (default .data/pglite) so a restart resumes from stored state; "memory://" for tests.
  */
 export async function openDb(
-  env: { DATABASE_URL?: string; PGLITE_DIR?: string } = process.env,
+  env: Record<string, string | undefined> = process.env, // reads DATABASE_URL, PGLITE_DIR
 ): Promise<{ db: Db; migrate: () => Promise<void>; close: () => Promise<void> }> {
   if (env.DATABASE_URL) {
-    const client = postgres(env.DATABASE_URL, { max: 10, onnotice: () => {} });
+    // prepare: false — transaction poolers (Supabase :6543, PgBouncer) cannot hold prepared statements.
+    const client = postgres(env.DATABASE_URL, { max: 10, prepare: false, onnotice: () => {} });
     const db = drizzlePostgres(client, { schema });
     return { db, migrate: () => migratePostgres(db, { migrationsFolder }), close: () => client.end() };
   }
