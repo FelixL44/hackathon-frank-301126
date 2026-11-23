@@ -1,4 +1,6 @@
 // Database tables (HAC-6). Shapes mirror src/domain/schema.ts; Zod validates at the boundary, the DB enforces uniqueness.
+// RLS without policies on every table: hosted Postgres APIs (e.g. Supabase Data API) see nothing; the app connects
+// as table owner and is unaffected.
 import { sql } from "drizzle-orm";
 import {
   bigserial,
@@ -34,7 +36,7 @@ export const cases = pgTable("cases", {
   vehicleId: text("vehicle_id"),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}).enableRLS();
 
 /** Every version is kept. A correction is a new row with the same source_id and supersedes_version set. */
 export const artifacts = pgTable(
@@ -50,7 +52,7 @@ export const artifacts = pgTable(
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.caseId, t.sourceId, t.version] })],
-);
+).enableRLS();
 
 export const observations = pgTable(
   "observations",
@@ -73,7 +75,7 @@ export const observations = pgTable(
       foreignColumns: [artifacts.caseId, artifacts.sourceId, artifacts.version],
     }),
   ],
-);
+).enableRLS();
 
 export const findings = pgTable("findings", {
   id: id(),
@@ -88,7 +90,7 @@ export const findings = pgTable("findings", {
   resolutionReason: text("resolution_reason"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: createdAt(),
-});
+}).enableRLS();
 
 /**
  * Inbound and outbound correspondence. Outbound rows with status "pending" are the message outbox:
@@ -112,7 +114,7 @@ export const messages = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique("messages_inbound_dedupe").on(t.channel, t.externalEventId)],
-);
+).enableRLS();
 
 export const tasks = pgTable("tasks", {
   id: id(),
@@ -122,7 +124,7 @@ export const tasks = pgTable("tasks", {
   findingIds: jsonb("finding_ids").$type<string[]>().notNull().default([]),
   status: text("status", { enum: ["open", "done"] }).notNull().default("open"),
   createdAt: createdAt(),
-});
+}).enableRLS();
 
 /** One approval per case revision: a double click hits the unique key and creates no second row. */
 export const approvals = pgTable(
@@ -136,7 +138,7 @@ export const approvals = pgTable(
     createdAt: createdAt(),
   },
   (t) => [unique("approvals_one_per_revision").on(t.caseId, t.revision)],
-);
+).enableRLS();
 
 /** Submission outbox: one row per approved revision, retried with the same idempotency key. */
 export const submissions = pgTable(
@@ -155,7 +157,7 @@ export const submissions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("submissions_one_per_revision").on(t.caseId, t.approvedRevision)],
-);
+).enableRLS();
 
 /** SIMULATED insurer portal storage. Separate from our records on purpose: it stands in for a foreign system. */
 export const portalReceipts = pgTable("portal_receipts", {
@@ -163,7 +165,7 @@ export const portalReceipts = pgTable("portal_receipts", {
   portalReference: text("portal_reference").notNull().unique(),
   payload: jsonb("payload").$type<ClaimFiling>().notNull(),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}).enableRLS();
 
 /** Case timeline and audit log. IDs and outcomes only, never raw files or private message bodies. */
 export const events = pgTable("events", {
@@ -179,4 +181,4 @@ export const events = pgTable("events", {
   latencyMs: integer("latency_ms"),
   detail: jsonb("detail").$type<Record<string, unknown>>(),
   createdAt: createdAt(),
-});
+}).enableRLS();

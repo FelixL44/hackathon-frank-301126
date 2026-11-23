@@ -6,7 +6,7 @@ A broker-facing app for a Portuguese insurance broker. It takes a customer's mot
 
 The agent checks whether the **case** is complete and consistent. It does not score customer credibility, decide on fraud, liability or coverage, or calculate payouts.
 
-> **Status:** pre-implementation. Commands below marked *(planned)* do not work yet. They are verified and the marker is removed as each part lands.
+> **Status:** vertical slice (HAC-7): a seeded consistent claim goes from intake to approval to a simulated portal receipt, with fixture-backed extraction (no model yet). Commands marked *(planned)* do not work yet.
 
 ## Demo scenario
 
@@ -82,20 +82,21 @@ Extraction goes through the [Vercel AI SDK](https://ai-sdk.dev) with `generateOb
 
 The demo inbox and the insurer portal are **simulated** and labeled as simulated in the UI. The portal stores a receipt per idempotency key and returns the original receipt when the same call is repeated.
 
-## Planned layout
+## Layout
 
 ```
 src/
-  app/                         Next.js pages and API routes
-  app/api/channels/[channel]/  inbound webhook endpoint
-  app/portal/                  simulated insurer portal
-  domain/                      case schema, required fields, decision policy (pure)
-  workflow/                    orchestration, outbox, retries
-  ports/                       Channel, ModelProvider, ObjectStorage interfaces
-  adapters/                    demo-inbox, email, slack, teams, model registry, storage
-  db/                          Drizzle schema, migrations, queries
-fixtures/                      versioned synthetic cases with expected findings
-evals/                         live model evaluation runner and results
+  app/                         Next.js pages and server actions (inbox, case view, portal receipt)
+  domain/                      case schema, decision table, filing preparation (pure, no I/O)
+  workflow/                    orchestration: open case, recompute, approve, dispatch
+  portal/                      simulated insurer portal (idempotent receipts)
+  db/                          Drizzle schema, client, migrate and seed scripts
+  server/                      per-process database handle for Next.js
+  app/api/channels/[channel]/  (planned, HAC-11) inbound webhook endpoint
+  ports/, adapters/            (planned, HAC-8/11) channel, model and storage adapters
+drizzle/                       SQL migrations
+fixtures/                      fixture manifest and fixture-backed case evidence
+evals/                         (planned, HAC-14) live model evaluation runner and results
 ```
 
 ## Environment variables
@@ -112,18 +113,24 @@ evals/                         live model evaluation runner and results
 | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | for `s3` | Private bucket |
 | `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | for Slack | Broker notifications |
 
-## Commands *(planned)*
+## Commands
+
+Requires Node.js 24 or newer. Without `DATABASE_URL` everything runs on embedded PGlite, so no database setup is needed.
 
 ```bash
 npm install
-npm run db:migrate        # apply Drizzle migrations (works)
-npm run db:generate       # after editing src/db/schema.ts: write a new SQL migration (works)
-npm run db:studio         # browse tables at https://local.drizzle.studio (works; stop the dev server first when on PGlite)
-npm run db:seed           # load synthetic demo cases
-npm run dev               # http://localhost:3000
-npm test                  # deterministic workflow tests (fixture-backed, no model)
-npm run eval              # live model evaluation on seeded evidence
+npm run dev               # applies migrations, then http://localhost:3000; start a demo case from the inbox
+npm run db:seed           # optional: create the demo cases from the command line
+npm test                  # deterministic tests (schema, database, workflow; fixture-backed, no model)
+npm run typecheck
+npm run build && npm start   # production build
+npm run db:migrate        # apply migrations to PGlite or DATABASE_URL
+npm run db:generate       # after editing src/db/schema.ts: write a new SQL migration
+npm run db:studio         # browse tables at https://local.drizzle.studio (stop the dev server first when on PGlite)
+npm run eval              # (planned) live model evaluation on seeded evidence
 ```
+
+Reset local data with `rm -rf .data`.
 
 ## Evaluation
 
