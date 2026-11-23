@@ -1,8 +1,19 @@
 import { defineConfig } from "drizzle-kit";
 
-// Only generates SQL from the schema; applying it is `npm run db:migrate`.
-export default defineConfig({
-  dialect: "postgresql",
-  schema: "./src/db/schema.ts",
-  out: "./drizzle",
-});
+// `generate` only needs the schema. `studio` also connects: DATABASE_URL if set, otherwise the local PGlite dir.
+export default defineConfig(
+  process.env.DATABASE_URL
+    ? {
+        dialect: "postgresql",
+        schema: "./src/db/schema.ts",
+        out: "./drizzle",
+        dbCredentials: { url: process.env.DATABASE_URL },
+      }
+    : {
+        dialect: "postgresql",
+        driver: "pglite",
+        schema: "./src/db/schema.ts",
+        out: "./drizzle",
+        dbCredentials: { url: process.env.PGLITE_DIR ?? ".data/pglite" },
+      },
+);
