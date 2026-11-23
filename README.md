@@ -103,6 +103,7 @@ evals/                         live model evaluation runner and results
 | Name | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | no (PGlite fallback) | Postgres connection string |
+| `PGLITE_DIR` | no (default `.data/pglite`) | PGlite data directory when `DATABASE_URL` is unset; `memory://` for a throwaway DB |
 | `MODEL_PROVIDER` | yes | `anthropic`, `openai` or `openai-compatible` |
 | `MODEL_ID` | yes | Model name at that provider |
 | `MODEL_BASE_URL` | for `openai-compatible` | For example `http://localhost:11434/v1` for Ollama |
@@ -115,7 +116,8 @@ evals/                         live model evaluation runner and results
 
 ```bash
 npm install
-npm run db:migrate        # apply Drizzle migrations
+npm run db:migrate        # apply Drizzle migrations (works)
+npm run db:generate       # after editing src/db/schema.ts: write a new SQL migration (works)
 npm run db:seed           # load synthetic demo cases
 npm run dev               # http://localhost:3000
 npm test                  # deterministic workflow tests (fixture-backed, no model)

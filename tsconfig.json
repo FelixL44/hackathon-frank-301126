@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src", "fixtures"]
+  "include": ["src", "fixtures", "drizzle.config.ts"]
 }
