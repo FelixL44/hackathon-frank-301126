@@ -106,3 +106,12 @@ The repository README should include working setup and migration commands, requi
 - [FRANK Retail Claims Agent](https://frankinsurance.ai/pt/en/use-cases/retail-claims-agent)
 - [FRANK Document Analyst Agent](https://www.frankinsurance.ai/pt/en/use-cases/document-analyst)
 - [inca's approach to checking claim evidence](https://www.get-inca.com/ki-schadenquotenoptimierung)
+
+## Task tracking (Linear)
+
+- Workspace: `hackathon-frank` (https://linear.app/hackathon-frank). Team key: `HAC`.
+- Project: `P-HAC-1` "FRANK Hackathon – Motor Claim Intake Agent", target date 30 Nov 2026.
+- Milestones follow the delivery plan above: M1 thin vertical slice, M2 real model and review loop, M3 reliability and evaluation, M4 demo freeze and submission.
+- Work is tracked as Linear issues `HAC-n`. Before creating an issue, search the project with `list_issues` to avoid duplicates.
+- Commit messages start with the issue ID, for example `HAC-6: ...`. Branch names use the issue's `gitBranchName`.
+- Move an issue to "In Progress" when work starts and to "Done" once its change is merged.
