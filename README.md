@@ -118,6 +118,7 @@ evals/                         live model evaluation runner and results
 npm install
 npm run db:migrate        # apply Drizzle migrations (works)
 npm run db:generate       # after editing src/db/schema.ts: write a new SQL migration (works)
+npm run db:studio         # browse tables at https://local.drizzle.studio (works; stop the dev server first when on PGlite)
 npm run db:seed           # load synthetic demo cases
 npm run dev               # http://localhost:3000
 npm test                  # deterministic workflow tests (fixture-backed, no model)

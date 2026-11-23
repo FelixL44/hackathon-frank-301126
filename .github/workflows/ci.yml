@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request: # every PR, including stacked PRs that target another feature branch
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Migrations must also apply to a real Postgres, not only PGlite.
+      - run: npm run db:migrate
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Fails when src/db/schema.ts changed without a matching migration in drizzle/.
+      - name: Migrations up to date
+        run: npx drizzle-kit generate && git diff --exit-code -- drizzle/

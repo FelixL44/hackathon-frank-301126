@@ -9,6 +9,7 @@
     "test": "node --test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=.env src/db/migrate.ts",
+    "db:studio": "node --env-file-if-exists=.env node_modules/drizzle-kit/bin.cjs studio",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
