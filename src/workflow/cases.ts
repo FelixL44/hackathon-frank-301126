@@ -1,20 +1,34 @@
-// Case workflow (HAC-7 slice): open → extract → decide → approve → submit → receipt.
+// Case workflow: open → extract → decide → approve → submit → receipt.
 // Every transition and its pending side effect are written in one transaction; side effects run after commit.
 import { randomBytes } from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { approvals, artifacts, cases, events, findings, messages, observations, submissions } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { prepareFiling } from "../domain/filing.ts";
-import { ModelExtraction, type ArtifactKind, type ProposedObservation, type SideEffect } from "../domain/schema.ts";
+import {
+  ModelExtraction,
+  type ArtifactKind,
+  type FindingRule,
+  type ProposedObservation,
+  type SideEffect,
+} from "../domain/schema.ts";
+import { ExtractionError } from "../extraction/model-extractor.ts";
 import type { Portal } from "../portal/simulated.ts";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Exec = Db | Tx;
 
 export type NewArtifact = { sourceId: string; kind: ArtifactKind; mediaType: string; objectKey: string };
-/** Reads one artifact and proposes observations. Fixture-backed now; the real model plugs in here (HAC-8). */
-export type Extractor = { name: string; extract(artifact: NewArtifact): Promise<ProposedObservation[]> };
+/** Reads one artifact and proposes observations: fixture-backed or model-backed (src/extraction/model-extractor.ts). */
+export type Extractor = {
+  name: string;
+  promptVersion?: string;
+  extract(artifact: NewArtifact): Promise<{ observations: ProposedObservation[]; attempts: number }>;
+};
+
+/** Findings that recompute() derives from observations; everything else (e.g. invalid_extraction) persists. */
+const DERIVED_RULES: FindingRule[] = ["missing", "illegible", "ambiguous"];
 
 export class WorkflowError extends Error {
   readonly code: "not_found" | "stale_approval" | "not_ready";
@@ -87,15 +101,38 @@ export async function openCase(
   // Extraction runs outside the transaction (model calls are slow); results are stored per artifact version.
   for (const a of input.artifacts) {
     const started = Date.now();
-    const { observations: proposed } = ModelExtraction.parse({ observations: await extractor.extract(a) });
-    if (proposed.length) {
-      await db.insert(observations).values(proposed.map((o) => ({ ...o, caseId: c.id, sourceId: a.sourceId, version: 1 })));
+    const run = { tool: extractor.name, promptVersion: extractor.promptVersion ?? null };
+    try {
+      const result = await extractor.extract(a);
+      const { observations: proposed } = ModelExtraction.parse({ observations: result.observations });
+      if (proposed.length) {
+        await db.insert(observations).values(proposed.map((o) => ({ ...o, caseId: c.id, sourceId: a.sourceId, version: 1 })));
+      }
+      await logEvent(db, c, "extract", {
+        ...run,
+        latencyMs: Date.now() - started,
+        detail: { sourceId: a.sourceId, observations: proposed.length, attempts: result.attempts },
+      });
+    } catch (e) {
+      // Unusable model output never blocks silently: it becomes a finding that routes the case to the broker.
+      const category = e instanceof ExtractionError ? e.category : "invalid_output";
+      const reason = e instanceof Error ? e.message : String(e);
+      await db.insert(findings).values({
+        caseId: c.id,
+        caseRevision: c.revision,
+        rule: "invalid_extraction",
+        field: null,
+        evidence: [],
+        explanation: `${a.sourceId}: extraction failed (${category}). ${reason}`.slice(0, 500),
+      });
+      await logEvent(db, c, "extract", {
+        ...run,
+        result: "error",
+        errorCategory: category,
+        latencyMs: Date.now() - started,
+        detail: { sourceId: a.sourceId, attempts: e instanceof ExtractionError ? e.attempts : null },
+      });
     }
-    await logEvent(db, c, "extract", {
-      tool: extractor.name,
-      latencyMs: Date.now() - started,
-      detail: { sourceId: a.sourceId, observations: proposed.length },
-    });
   }
 
   await recompute(db, c.id);
@@ -109,13 +146,19 @@ export async function recompute(db: Db, caseId: string) {
     const state = await loadCase(tx, caseId);
     if (state.case.status === "submitting" || state.case.status === "submitted") return;
 
-    await tx.delete(findings).where(and(eq(findings.caseId, caseId), eq(findings.status, "open")));
+    await tx
+      .delete(findings)
+      .where(and(eq(findings.caseId, caseId), eq(findings.status, "open"), inArray(findings.rule, DERIVED_RULES)));
     if (state.gaps.length) {
       await tx.insert(findings).values(
         state.gaps.map((g) => ({ ...g, caseId, caseRevision: state.case.revision, evidence: [] })),
       );
     }
-    const rule = decide(state.gaps.map((g) => g.rule));
+    const persisted = await tx
+      .select({ rule: findings.rule })
+      .from(findings)
+      .where(and(eq(findings.caseId, caseId), eq(findings.status, "open"), notInArray(findings.rule, DERIVED_RULES)));
+    const rule = decide([...state.gaps.map((g) => g.rule), ...persisted.map((f) => f.rule)]);
     await tx
       .update(cases)
       .set({

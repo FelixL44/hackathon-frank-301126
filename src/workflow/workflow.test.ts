@@ -6,7 +6,8 @@ import { openDb, type Db } from "../db/client.ts";
 import { approvals, cases, observations, portalReceipts, submissions } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { simulatedPortal } from "../portal/simulated.ts";
-import { approve, loadCase, openCase, recompute, WorkflowError } from "./cases.ts";
+import { ExtractionError } from "../extraction/model-extractor.ts";
+import { approve, caseView, loadCase, openCase, recompute, WorkflowError } from "./cases.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -66,6 +67,26 @@ test("approving a stale revision is rejected and submits nothing", async () => {
     return e instanceof WorkflowError && e.code === "stale_approval";
   });
   assert.equal(await count(submissions, id), 0);
+});
+
+test("failed extraction routes to broker review with the reason, and recompute keeps it", async () => {
+  const failing = {
+    name: "fake:failing",
+    promptVersion: "test",
+    async extract() {
+      throw new ExtractionError("invalid_output", "observations.0: quote missing", 3);
+    },
+  };
+  const id = await openCase(db, FIXTURE_CASES["F1-consistent"]!, failing);
+  await recompute(db, id);
+  const view = await caseView(db, id);
+  assert.equal(view.case.status, "broker_review");
+  const invalid = view.findings.filter((f) => f.rule === "invalid_extraction");
+  assert.equal(invalid.length, 3); // one per artifact
+  assert.match(invalid[0]!.explanation, /invalid_output/);
+  const errors = view.events.filter((e) => e.operation === "extract" && e.result === "error");
+  assert.equal(errors[0]!.errorCategory, "invalid_output");
+  assert.equal(errors[0]!.promptVersion, "test");
 });
 
 test("a missing required field routes to awaiting_information", async () => {

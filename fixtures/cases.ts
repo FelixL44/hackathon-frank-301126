@@ -56,5 +56,5 @@ export const FIXTURE_CASES: Record<string, FixtureCase> = {
 
 export const fixtureExtractor = (fixtureId: string): Extractor => ({
   name: `fixture:${fixtureId}`,
-  extract: async (artifact) => FIXTURE_CASES[fixtureId]!.observations[artifact.sourceId] ?? [],
+  extract: async (artifact) => ({ observations: FIXTURE_CASES[fixtureId]!.observations[artifact.sourceId] ?? [], attempts: 1 }),
 });
