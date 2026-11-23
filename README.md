@@ -20,6 +20,17 @@ A second seeded case with a blurry photo shows how ambiguity changes the next ac
 
 ## Architecture
 
+### Current flow diagram
+
+An interactive diagram of what is built so far: components, the numbered happy path, guards and open issues. Every box links to its source lines.
+
+- With the app running (`npm run dev`): **<http://localhost:3000/architecture.html>**
+- Without it: open [`public/architecture.html`](public/architecture.html) in a browser (`open public/architecture.html` on macOS). GitHub shows only its source.
+
+The file is regenerated with Archify after each larger change; the working files in `.archify/` are not committed.
+
+### Design
+
 One Next.js application serves the broker UI, the orchestration and the simulated portal. The core workflow depends only on three **ports** (interfaces). Each integration is an adapter behind one of them, so a new channel, model or database host does not touch the decision logic.
 
 ```
