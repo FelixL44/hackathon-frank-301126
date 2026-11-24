@@ -1,12 +1,47 @@
-# Motor claim intake agent
+# Claim intake agent for insurance brokers
 
 FRANK Software Engineer hackathon, winter 2026 (deadline: 30 Nov 2026, 23:59 Lisbon time).
 
-A broker-facing app for a Portuguese insurance broker. It takes a customer's motor damage report (message, photos, workshop estimate) and builds a claim file. It asks for missing evidence, shows material discrepancies to the broker and files an approved report in a simulated insurer portal. The run finishes with a stored claim reference that the broker can reopen.
+A broker-facing app for a Portuguese insurance broker. Motor damage is the main demo case; other claim types follow as configurable categories (see [Team plan](#team-plan)). It takes a customer's motor damage report (message, photos, workshop estimate) and builds a claim file. It asks for missing evidence, shows material discrepancies to the broker and files an approved report in a simulated insurer portal. The run finishes with a stored claim reference that the broker can reopen.
 
 The agent checks whether the **case** is complete and consistent. It does not score customer credibility, decide on fraud, liability or coverage, or calculate payouts.
 
 > **Status:** vertical slice (HAC-7): a seeded consistent claim goes from intake to approval to a simulated portal receipt, with fixture-backed extraction (no model yet). Commands marked *(planned)* do not work yet.
+
+## Team plan
+
+Agreed in the team call on 24 Nov 2026. Issues HAC-24 to HAC-33 in Linear track the work; the full notes are the Linear project document "Team plan after the call on 24 Nov 2026".
+
+**Who the app is for.** An insurance **broker**, not an insurer. Customers send their damage report to the broker. The agent collects and checks the evidence, the broker reviews it and forwards the claim to the insurer (the simulated portal). The brief judges reliability and design choices as much as the demo: tools, orchestration, memory, retries and evaluations.
+
+**Decisions**
+
+1. **Keep this repo** and build on the existing flow: open case → extraction → decision → approval → portal receipt.
+2. **Modular claim categories.** Motor stays the main demo. An admin can add a category and configure the agent for it: prompt, required documents and fields, rules, context files and examples. The demo ships 2–3 categories.
+3. **Three views**, all backed by the database:
+   - **Customer:** upload documents, chat with the agent, see own cases.
+   - **Broker:** assigned cases, the agent's assessment and findings next to the sources, approve and forward, ask the customer for more.
+   - **Admin:** categories, agent configuration, context documents.
+4. **Channels.** One generic inbound endpoint (`POST /api/channels/:channel/webhook`). Demo channel: **WhatsApp Business**; only the broker needs a Business account. Telegram is the fallback; the web chat always works.
+5. **Conversational intake.** The agent asks the customer for the damage type, the estimate, photos and policy data, and asks again when something is missing or unreadable.
+6. **The broker confirms every outgoing message.** The broker clicks a short action or writes a short instruction; the agent drafts a polite message; the broker confirms it before it goes out. The agent never contacts the customer on its own.
+7. **Reliability.** Retries with a visible warning and a one-click retry when extraction fails; stress tests and evaluations stay in scope.
+8. **Language.** Multi-language. Test and evaluation data in English so the team can check it; Portuguese stays supported for the demo.
+9. **Database.** Supabase as the shared test database, Postgres/PGlite locally through Drizzle. Each table gets a one-line explanation (HAC-31).
+
+**Who does what**
+
+| Person | Area |
+| --- | --- |
+| Felix | Backend and LLM: agent, categories, conversational intake, drafted messages, schema, Supabase |
+| Frederik | WhatsApp Business integration (Telegram fallback), FRANK style guide, frontend support |
+| Emre | Frontend: customer, broker and admin views; README and Linear |
+
+**How we work**
+
+- One branch per feature, pull request into `main`. A `staging` branch for testing features together is proposed.
+- Every Claude session records its work in Linear.
+- Open questions: a cheaper model for development (Claude for the demo is agreed), the exact demo categories, and whether a WhatsApp Business account is possible this week.
 
 ## Demo scenario
 
