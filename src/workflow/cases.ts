@@ -5,11 +5,13 @@ import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { approvals, artifacts, cases, events, findings, messages, observations, submissions } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
+import { compareSources, conflictKey } from "../domain/compare.ts";
 import { prepareFiling } from "../domain/filing.ts";
 import {
   ModelExtraction,
   type ArtifactKind,
   type FindingRule,
+  type RequiredField,
   type ProposedObservation,
   type SideEffect,
 } from "../domain/schema.ts";
@@ -30,10 +32,10 @@ export type Extractor = {
 };
 
 /** Findings that recompute() derives from observations; everything else (e.g. invalid_extraction) persists. */
-const DERIVED_RULES: FindingRule[] = ["missing", "illegible", "ambiguous"];
+const DERIVED_RULES: FindingRule[] = ["missing", "illegible", "ambiguous", "conflict"];
 
 export class WorkflowError extends Error {
-  readonly code: "not_found" | "stale_approval" | "not_ready";
+  readonly code: "not_found" | "stale_approval" | "not_ready" | "invalid_resolution";
   constructor(code: WorkflowError["code"], message: string) {
     super(message);
     this.code = code;
@@ -55,8 +57,22 @@ export async function loadCase(db: Exec, caseId: string) {
   const [c] = await db.select().from(cases).where(eq(cases.id, caseId));
   if (!c) throw new WorkflowError("not_found", `case ${caseId} not found`);
   const arts = await db.select().from(artifacts).where(eq(artifacts.caseId, caseId)).orderBy(asc(artifacts.sourceId));
-  const obs = await db.select().from(observations).where(eq(observations.caseId, caseId));
-  return { case: c, artifacts: arts, observations: obs, ...prepareFiling(c, arts, obs) };
+  // Stable order, so the filing shown to the broker and the one frozen at approval pick the same values.
+  const obs = await db
+    .select()
+    .from(observations)
+    .where(eq(observations.caseId, caseId))
+    .orderBy(asc(observations.sourceId), asc(observations.version), asc(observations.id));
+  const found = await db.select().from(findings).where(eq(findings.caseId, caseId)).orderBy(asc(findings.createdAt));
+  const resolved = found.filter((f) => f.status === "resolved" && f.rule === "conflict");
+  const accepted = Object.fromEntries(
+    resolved.filter((f) => f.field && f.acceptedSourceId).map((f) => [f.field, f.acceptedSourceId]),
+  ) as Partial<Record<RequiredField, string>>;
+  // A resolved conflict stays resolved until its evidence changes (a new version gives it a new key).
+  const conflicts = compareSources(arts, obs).filter(
+    (k) => !resolved.some((f) => conflictKey(f.field, f.evidence) === conflictKey(k.field, k.evidence)),
+  );
+  return { case: c, artifacts: arts, observations: obs, findings: found, conflicts, ...prepareFiling(c, arts, obs, accepted) };
 }
 
 /** Everything the broker's case screen shows. */
@@ -65,7 +81,6 @@ export async function caseView(db: Db, caseId: string) {
   return {
     ...state,
     messages: await db.select().from(messages).where(eq(messages.caseId, caseId)).orderBy(asc(messages.createdAt)),
-    findings: await db.select().from(findings).where(eq(findings.caseId, caseId)).orderBy(asc(findings.createdAt)),
     events: await db.select().from(events).where(eq(events.caseId, caseId)).orderBy(asc(events.id)),
     submission: (await db.select().from(submissions).where(eq(submissions.caseId, caseId)))[0] ?? null,
     approval:
@@ -154,16 +169,15 @@ export async function recompute(db: Db, caseId: string) {
     await tx
       .delete(findings)
       .where(and(eq(findings.caseId, caseId), eq(findings.status, "open"), inArray(findings.rule, DERIVED_RULES)));
-    if (state.gaps.length) {
-      await tx.insert(findings).values(
-        state.gaps.map((g) => ({ ...g, caseId, caseRevision: state.case.revision, evidence: [] })),
-      );
+    const derived = [...state.conflicts, ...state.gaps.map((g) => ({ ...g, evidence: [] }))];
+    if (derived.length) {
+      await tx.insert(findings).values(derived.map((f) => ({ ...f, caseId, caseRevision: state.case.revision })));
     }
     const persisted = await tx
       .select({ rule: findings.rule })
       .from(findings)
       .where(and(eq(findings.caseId, caseId), eq(findings.status, "open"), notInArray(findings.rule, DERIVED_RULES)));
-    const rule = decide([...state.gaps.map((g) => g.rule), ...persisted.map((f) => f.rule)]);
+    const rule = decide([...derived.map((f) => f.rule), ...persisted.map((f) => f.rule)]);
     await tx
       .update(cases)
       .set({
@@ -175,9 +189,50 @@ export async function recompute(db: Db, caseId: string) {
       .where(eq(cases.id, caseId));
     await logEvent(tx, state.case, "decide", {
       sideEffect: rule.action as SideEffect,
-      detail: { rule: rule.name, status: rule.status, gaps: state.gaps.length },
+      detail: { rule: rule.name, status: rule.status, gaps: state.gaps.length, conflicts: state.conflicts.length },
     });
   });
+}
+
+/**
+ * Broker resolves a material conflict with a reason. `acceptedSourceId` (one of the cited sources) decides whose
+ * values go into the filing; null means both are right (e.g. two separate damages). Only a broker may do this.
+ */
+export async function resolveConflict(
+  db: Db,
+  caseId: string,
+  findingId: string,
+  input: { reason: string; acceptedSourceId: string | null },
+) {
+  await db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(cases).where(eq(cases.id, caseId)).for("update");
+    if (!locked) throw new WorkflowError("not_found", `case ${caseId} not found`);
+    const [finding] = await tx
+      .select()
+      .from(findings)
+      .where(and(eq(findings.id, findingId), eq(findings.caseId, caseId)));
+    if (!finding || finding.rule !== "conflict" || finding.status !== "open") {
+      throw new WorkflowError("invalid_resolution", "only an open conflict of this case can be resolved");
+    }
+    if (!input.reason.trim()) throw new WorkflowError("invalid_resolution", "a resolution needs a reason");
+    if (input.acceptedSourceId && !finding.evidence.some((e) => e.sourceId === input.acceptedSourceId)) {
+      throw new WorkflowError("invalid_resolution", "the accepted source must be one of the cited sources");
+    }
+    await tx
+      .update(findings)
+      .set({
+        status: "resolved",
+        resolvedBy: BROKER,
+        resolutionReason: input.reason.trim(),
+        resolvedAt: new Date(),
+        acceptedSourceId: input.acceptedSourceId,
+      })
+      .where(eq(findings.id, findingId));
+    await logEvent(tx, locked, "resolve", {
+      detail: { findingId, field: finding.field, acceptedSourceId: input.acceptedSourceId, by: BROKER },
+    });
+  });
+  await recompute(db, caseId);
 }
 
 /**

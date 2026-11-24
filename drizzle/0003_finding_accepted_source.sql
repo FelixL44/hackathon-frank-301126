@@ -1,0 +1,1 @@
+ALTER TABLE "findings" ADD COLUMN "accepted_source_id" text;

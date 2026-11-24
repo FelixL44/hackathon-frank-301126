@@ -7,7 +7,7 @@ import { approvals, cases, observations, portalReceipts, submissions } from "../
 import { decide } from "../domain/decide.ts";
 import { simulatedPortal } from "../portal/simulated.ts";
 import { ExtractionError } from "../extraction/model-extractor.ts";
-import { approve, caseView, loadCase, openCase, recompute, WorkflowError } from "./cases.ts";
+import { approve, caseView, loadCase, openCase, recompute, resolveConflict, WorkflowError } from "./cases.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -87,6 +87,23 @@ test("failed extraction routes to broker review with the reason, and recompute k
   const errors = view.events.filter((e) => e.operation === "extract" && e.result === "error");
   assert.equal(errors[0]!.errorCategory, "invalid_output");
   assert.equal(errors[0]!.promptVersion, "test");
+});
+
+test("F3: the broker resolves the conflict for the report; the filing then carries only the front", async () => {
+  const id = await openCase(db, FIXTURE_CASES["F3-front-rear-conflict"]!, fixtureExtractor("F3-front-rear-conflict"));
+  const before = await caseView(db, id);
+  assert.equal(before.case.status, "broker_review");
+  const conflict = before.findings.find((f) => f.rule === "conflict")!;
+  assert.deepEqual([...new Set(conflict.evidence.map((e) => e.sourceId))], ["message-1", "estimate-1"]);
+
+  await assert.rejects(resolveConflict(db, id, conflict.id, { reason: "x", acceptedSourceId: "photo-9" }), WorkflowError);
+  await resolveConflict(db, id, conflict.id, { reason: "Workshop confirmed by phone: front bumper.", acceptedSourceId: "message-1" });
+  await recompute(db, id); // stays resolved: same evidence, same key
+  const after = await caseView(db, id);
+  assert.equal(after.case.status, "awaiting_approval");
+  assert.deepEqual(after.filing?.damagedArea, ["bumper:front"]);
+  assert.equal(after.findings.filter((f) => f.status === "open").length, 0);
+  assert.ok(after.events.some((e) => e.operation === "resolve"));
 });
 
 test("a missing required field routes to awaiting_information", async () => {

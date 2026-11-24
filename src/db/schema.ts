@@ -90,6 +90,7 @@ export const findings = pgTable("findings", {
   resolvedBy: text("resolved_by"), // broker identity or demo session
   resolutionReason: text("resolution_reason"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  acceptedSourceId: text("accepted_source_id"), // conflict resolution: the source whose values go into the filing
   createdAt: createdAt(),
 }).enableRLS();
 

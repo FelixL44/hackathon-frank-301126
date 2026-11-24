@@ -54,7 +54,7 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
             <h2>Evidence</h2>
             <ul>
               {view.artifacts.map((a) => (
-                <li key={`${a.sourceId}-${a.version}`}>
+                <li key={`${a.sourceId}-${a.version}`} id={`src-${a.sourceId}-v${a.version}`}>
                   <strong>{a.sourceId}</strong> v{a.version} · {a.kind}
                   {a.supersedesVersion && <> · replaces v{a.supersedesVersion}</>}
                   <br />
@@ -75,6 +75,24 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
                 {view.findings.map((f) => (
                   <li key={f.id}>
                     <span className="badge">{f.rule}</span> {f.explanation} <span className="muted">({f.status})</span>
+                    {f.evidence.length > 0 && (
+                      <ul>
+                        {f.evidence.map((e, i) => (
+                          <li key={i}>
+                            <a href={`#src-${e.sourceId}-v${e.version}`}>
+                              {e.sourceId} v{e.version}
+                            </a>{" "}
+                            <span className="muted">{where(e.locator)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {f.status === "resolved" && (
+                      <div className="muted">
+                        Resolved by {f.resolvedBy}: {f.resolutionReason}
+                        {f.acceptedSourceId && <> · filing uses {f.acceptedSourceId}</>}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

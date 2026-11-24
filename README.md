@@ -86,6 +86,17 @@ The extractor talks to one small port (`src/model/provider.ts`) with two adapter
 - **Daily budget** (`MODEL_DAILY_BUDGET_EUR`, default 1 €): every extraction event stores its cost. Before a new case starts, the app sums today's spend (Lisbon day). Once the budget is reached it uses fixture data and says so in the header. Claude prices are built in, local models cost 0, and OpenAI needs `MODEL_PRICE_USD_PER_MTOK`. The budget is counted per database, so each local PGlite has its own. `npm run model:smoke` is not counted.
 - Keys stay on the server. One model configuration per deployment; per-tenant keys come later.
 
+### Comparison rules (`src/domain/compare.ts`)
+
+Only current versions and legible values count. A conflict sends the case to broker review and cites every source involved.
+
+- **Vehicle:** different plates conflict. Case and separators are ignored, so `aa 12bc` equals `AA-12-BC`.
+- **Incident date:** different dates conflict.
+- **Damaged area:** every area in a photo or estimate must overlap an area in the customer's report (each position is a set of directions: `front_left` overlaps `front` and `left`). A report naming both ends supports either. An `unknown` angle never conflicts. Without areas in the report, the photo is the reference.
+- The free-text event description and the policy number are not compared.
+- **Resolution:** the broker gives a reason and can name the source that is right (`acceptedSourceId`); only that source's values go into the filing. A resolved conflict stays resolved until its evidence changes version.
+- **Grounding:** a quote that names a direction (`dianteiro`, `traseiro`, …) must match the normalized position, or the model must retry.
+
 ### 3. Database and storage
 
 - **PostgreSQL** is the only SQL dialect, configured through `DATABASE_URL`. It runs on any Postgres host: local Docker, Supabase, Neon, AWS RDS, Azure.
