@@ -43,7 +43,7 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
         <Link href="/">← Inbox</Link>
       </div>
 
-      {error && <p className="notice">{ERRORS[error] ?? error}</p>}
+      {error && <p className="notice error">{ERRORS[error] ?? error}</p>}
 
       {c.status === "intake" &&
         (Date.now() - (view.events.at(-1)?.createdAt ?? c.updatedAt).getTime() > STALE_INTAKE_MS ? (
