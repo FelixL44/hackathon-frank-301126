@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { ModelRefusal, type ModelProvider } from "../model/provider.ts";
 import { readObject } from "../storage/objects.ts";
-import { quoteOnPage } from "./grounding.ts";
+import { directionMismatch, quoteOnPage } from "./grounding.ts";
 import { ExtractionError, MAX_ATTEMPTS, modelExtractor, pdfPages } from "./model-extractor.ts";
 
 const message = { sourceId: "message-1", kind: "message" as const, mediaType: "text/plain", objectKey: "fixtures/F1/message-1.txt" };
@@ -39,6 +39,13 @@ const fakeProvider = (...answers: unknown[]) => {
 test("quotes match despite case, whitespace and quote style", () => {
   assert.ok(quoteOnPage(["Reparação e   pintura do\npara-choques traseiro"], "pintura do Para-Choques traseiro", 1));
   assert.ok(!quoteOnPage(["só a página 1"], "só a página 1", 2));
+});
+
+test("a quote saying rear cannot be normalized to front", () => {
+  assert.match(directionMismatch("pintura do para-choques traseiro", "bumper:front")!, /says rear/);
+  assert.equal(directionMismatch("para-choques dianteiro e traseiro", "bumper:rear"), null); // either end is named
+  assert.equal(directionMismatch("para-choques dianteiro esquerdo", "bumper:front_left"), null);
+  assert.equal(directionMismatch("risco no para-choques", "bumper:rear"), null); // no direction word, nothing to check
 });
 
 test("generated estimate PDF has the rear-bumper line on page 1 of 2", async () => {

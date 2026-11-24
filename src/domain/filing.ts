@@ -1,8 +1,8 @@
 // Completeness check and filing preparation. Pure: the workflow passes in stored rows, gets back gaps or a filing.
 import { ClaimFiling, PARKING_DAMAGE_REQUIRED_KINDS, RequiredField, type FindingRule } from "./schema.ts";
 
-type ArtifactLike = { sourceId: string; version: number; kind: string };
-type ObservationLike = {
+export type ArtifactLike = { sourceId: string; version: number; kind: string };
+export type ObservationLike = {
   sourceId: string;
   version: number;
   field: string;
@@ -23,14 +23,26 @@ const usable = (o: ObservationLike) =>
 
 const EXTRACTED_FIELDS = RequiredField.exclude(["caseReference"]).options;
 
+const ofCurrent = <O extends ObservationLike>(artifacts: readonly ArtifactLike[], obs: readonly O[]) => {
+  const current = currentArtifacts(artifacts);
+  return obs.filter((o) => current.some((a) => a.sourceId === o.sourceId && a.version === o.version));
+};
+
+/** Observations that can support a filing or a comparison: from a current version, legible, with a value. */
+export const usableCurrent = <O extends ObservationLike>(artifacts: readonly ArtifactLike[], obs: readonly O[]) =>
+  ofCurrent(artifacts, obs).filter(usable);
+
+/** `accepted` holds the broker's resolution per field: only that source's values go into the filing. */
 export function prepareFiling(
   c: { reference: string; revision: number },
   allArtifacts: readonly ArtifactLike[],
   allObservations: readonly ObservationLike[],
+  accepted: Partial<Record<RequiredField, string>> = {},
 ): { filing: ClaimFiling | null; gaps: Gap[] } {
   const current = currentArtifacts(allArtifacts);
-  const obs = allObservations.filter((o) => current.some((a) => a.sourceId === o.sourceId && a.version === o.version));
-  const ok = (field: string) => obs.filter((o) => o.field === field && usable(o));
+  const obs = ofCurrent(allArtifacts, allObservations);
+  const ok = (field: string) =>
+    obs.filter((o) => o.field === field && usable(o) && (accepted[field as RequiredField] ?? o.sourceId) === o.sourceId);
 
   const gaps: Gap[] = [];
   for (const kind of PARKING_DAMAGE_REQUIRED_KINDS) {
