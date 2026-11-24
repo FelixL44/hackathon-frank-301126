@@ -3,14 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { FIXTURE_CASES, fixtureExtractor } from "../../fixtures/cases.ts";
+import { FIXTURE_CASES } from "../../fixtures/cases.ts";
 import { simulatedPortal } from "../portal/simulated.ts";
 import { getDb } from "../server/db.ts";
+import { extractorFor } from "../server/extractor.ts";
 import { approve, openCase, WorkflowError } from "../workflow/cases.ts";
 
 export async function launchFixture(form: FormData) {
   const fixtureId = z.enum(Object.keys(FIXTURE_CASES) as [string, ...string[]]).parse(form.get("fixtureId"));
-  const id = await openCase(await getDb(), FIXTURE_CASES[fixtureId]!, fixtureExtractor(fixtureId));
+  const db = await getDb();
+  const id = await openCase(db, FIXTURE_CASES[fixtureId]!, await extractorFor(db, fixtureId));
   revalidatePath("/");
   redirect(`/cases/${id}`);
 }

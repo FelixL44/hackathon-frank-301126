@@ -68,18 +68,23 @@ interface Channel {
 
 ### 2. Model provider: bring your own AI
 
-Extraction goes through the [Vercel AI SDK](https://ai-sdk.dev) with `generateObject` and a Zod schema, so every provider returns the same validated structure:
+The extractor talks to one small port (`src/model/provider.ts`) with two adapters:
 
-| `MODEL_PROVIDER` | Covers |
-| --- | --- |
-| `anthropic` | Claude models |
-| `openai` | OpenAI models |
-| `openai-compatible` | Local or self-hosted models through `MODEL_BASE_URL` (Ollama, LM Studio, vLLM, Azure OpenAI and others) |
+| `MODEL_PROVIDER` | Adapter | Covers |
+| --- | --- | --- |
+| `anthropic` | official `@anthropic-ai/sdk`, structured outputs | Claude (default `claude-opus-5-5`); PDFs as documents, photos as images |
+| `openai` | `openai` SDK, JSON-schema response format | OpenAI models |
+| `openai-compatible` | same adapter with `MODEL_BASE_URL` | Local or self-hosted servers: Ollama, LM Studio, vLLM, Azure OpenAI |
 
-- PDFs are rendered to page images, and their text layer is extracted on the server. This works for any model that accepts images, and every quote gets a stable page locator.
-- Every model call records the provider, model ID and prompt version on the case event.
-- The evaluation suite can be run per provider to compare routing and evidence-link accuracy.
-- Keys stay on the server. For the hackathon there is one model configuration per deployment. Per-tenant keys stored encrypted in the database come later.
+- The model returns one flat JSON shape; the app validates it with Zod and maps it onto the domain observation.
+- **Grounding check:** every quote must occur on the page it names in the PDF's text layer (extracted with `unpdf`, pure JS). Photos need a visual description instead.
+- Rejected output goes back to the model with the reasons, at most 3 attempts. After that, or on a refusal or missing file, the case gets an `invalid_extraction` finding and goes to broker review.
+- PDFs: Claude receives the file itself plus its text layer; OpenAI-compatible servers receive the text layer only. Scanned PDFs without a text layer therefore need Claude.
+- Every extraction event records provider, model, prompt version, attempts and latency. The UI header shows which extractor is active.
+- Without `MODEL_PROVIDER` the app uses the fixtures' pre-extracted observations, so it runs without any key.
+- Claude requests opt into server-side refusal fallback (`fallbacks: "default"`). Events record the model that actually answered.
+- **Daily budget** (`MODEL_DAILY_BUDGET_EUR`, default 1 €): every extraction event stores its cost. Before a new case starts, the app sums today's spend (Lisbon day). Once the budget is reached it uses fixture data and says so in the header. Claude prices are built in, local models cost 0, and OpenAI needs `MODEL_PRICE_USD_PER_MTOK`. The budget is counted per database, so each local PGlite has its own. `npm run model:smoke` is not counted.
+- Keys stay on the server. One model configuration per deployment; per-tenant keys come later.
 
 ### 3. Database and storage
 
@@ -87,7 +92,7 @@ Extraction goes through the [Vercel AI SDK](https://ai-sdk.dev) with `generateOb
 - If `DATABASE_URL` is not set, the app uses in-process **PGlite** for tests and zero-setup local runs.
 - The ORM and migrations are **Drizzle**. All queries live in `src/db/`.
 - Several dialects (MySQL, SQLite, MongoDB) are deliberately not supported. Reliability depends on transactions, unique constraints, row locks and JSONB, and every extra dialect would multiply the test matrix. Swapping the repository layer later stays possible.
-- **Object storage** is selected through `STORAGE_DRIVER=local|s3`. Any S3-compatible service works: AWS S3, Cloudflare R2, MinIO, Supabase Storage.
+- **Object storage** (`src/storage/objects.ts`): local files now (`fixtures/files/` for synthetic evidence, `.data/objects/` otherwise). An S3-compatible driver (AWS S3, Cloudflare R2, MinIO, Supabase Storage) comes with deployment.
 
 ### Simulated services
 
@@ -102,11 +107,13 @@ src/
   workflow/                    orchestration: open case, recompute, approve, dispatch
   portal/                      simulated insurer portal (idempotent receipts)
   db/                          Drizzle schema, client, migrate and seed scripts
-  server/                      per-process database handle for Next.js
+  extraction/                  prompt, grounding check, model-backed extractor with retry budget
+  model/                       provider port + Anthropic and OpenAI(-compatible) adapters, smoke script
+  storage/                     evidence file access
+  server/                      per-process database handle and extractor selection for Next.js
   app/api/channels/[channel]/  (planned, HAC-11) inbound webhook endpoint
-  ports/, adapters/            (planned, HAC-8/11) channel, model and storage adapters
 drizzle/                       SQL migrations
-fixtures/                      fixture manifest and fixture-backed case evidence
+fixtures/                      fixture manifest, fixture-backed observations, synthetic evidence files (files/)
 evals/                         (planned, HAC-14) live model evaluation runner and results
 ```
 
@@ -116,12 +123,13 @@ evals/                         (planned, HAC-14) live model evaluation runner an
 | --- | --- | --- |
 | `DATABASE_URL` | no (PGlite fallback) | Postgres connection string |
 | `PGLITE_DIR` | no (default `.data/pglite`) | PGlite data directory when `DATABASE_URL` is unset; `memory://` for a throwaway DB |
-| `MODEL_PROVIDER` | yes | `anthropic`, `openai` or `openai-compatible` |
-| `MODEL_ID` | yes | Model name at that provider |
+| `MODEL_PROVIDER` | no (fixture data) | `anthropic`, `openai` or `openai-compatible` |
+| `MODEL_ID` | for `openai*` | Model name at that provider; Anthropic defaults to `claude-opus-5-5` |
 | `MODEL_BASE_URL` | for `openai-compatible` | For example `http://localhost:11434/v1` for Ollama |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | for that provider | Server-side only |
-| `STORAGE_DRIVER` | no (default `local`) | `local` or `s3` |
-| `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | for `s3` | Private bucket |
+| `MODEL_DAILY_BUDGET_EUR` | no (default `1`) | Model spend per Lisbon day before the app falls back to fixture data |
+| `MODEL_PRICE_USD_PER_MTOK` | for `openai` | `<input>,<output>` USD per million tokens from the provider's price list; overrides built-in prices |
+| `STORAGE_DRIVER`, `S3_*` | (planned, deployment) | S3-compatible private bucket |
 | `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | for Slack | Broker notifications |
 
 ## Commands
@@ -138,6 +146,8 @@ npm run build && npm start   # production build
 npm run db:migrate        # apply migrations to PGlite or DATABASE_URL
 npm run db:generate       # after editing src/db/schema.ts: write a new SQL migration
 npm run db:studio         # browse tables at https://local.drizzle.studio (stop the dev server first when on PGlite)
+npm run model:smoke -- fixtures/F3/estimate-1.pdf   # live extraction of one evidence file with the configured model (costs tokens)
+npm run fixtures:generate # rewrite the synthetic message and estimate files in fixtures/files/
 npm run eval              # (planned) live model evaluation on seeded evidence
 ```
 
