@@ -1,3 +1,8 @@
+# Agent notes
+
+- Project brief and hard rules: [`CLAUDE.md`](CLAUDE.md).
+- UI design: follow [`frank-design-tokens.md`](frank-design-tokens.md); reuse the CSS variables and classes in `src/app/globals.css`, no hard-coded colors or one-off styles.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 ## This is NOT the Next.js you know

@@ -27,7 +27,7 @@ An app for an insurance **broker** (not an insurer). Customers report damage via
 - Read `README.md` first: architecture, ports (channel, model provider, database), env vars and commands.
 - Stack: Next.js (read `node_modules/next/dist/docs/` before Next code, see `AGENTS.md`), TypeScript, Drizzle on Postgres (Supabase shared, PGlite locally), Zod-validated model output, Anthropic/OpenAI providers.
 - Run `npm test` and `npm run typecheck` before a PR. Deterministic tests stay separate from live model evals.
-- UI follows the FRANK style guide on main.
+- **UI design: follow [`frank-design-tokens.md`](frank-design-tokens.md)** (FRANK look, merged by Frederik). The app implements it as plain CSS variables and classes in `src/app/globals.css` (section 2a). Reuse those tokens and classes for every new page and component; no hard-coded colors, fonts or one-off styles. Tailwind and shadcn are not installed; don't add them without team agreement. Teal is the only saturated UI color, hairline borders, soft shadows, rounded-full pills, rounded-xl cards, no uppercase headings.
 - Smallest complete change; reuse existing helpers in `src/`.
 
 ## Team and workflow

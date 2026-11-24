@@ -148,6 +148,10 @@ Each file's observations, findings and `extract` event are written in one transa
 
 The demo inbox and the insurer portal are **simulated** and labeled as simulated in the UI. The portal stores a receipt per idempotency key and returns the original receipt when the same call is repeated.
 
+## UI design
+
+All views follow the FRANK look described in [`frank-design-tokens.md`](frank-design-tokens.md): grey and white surfaces, teal (`#00888F`) as the only brand color, navy in gradients, Roboto and Plus Jakarta Sans. The tokens live as plain CSS variables in `src/app/globals.css`. New pages and components reuse these variables and classes instead of their own colors or styles.
+
 ## Layout
 
 ```
