@@ -117,7 +117,7 @@ The demo inbox and the insurer portal are **simulated** and labeled as simulated
 
 ```
 src/
-  app/                         Next.js pages and server actions (inbox, case view, portal receipt)
+  app/                         Next.js pages and server actions (inbox, case view, source viewer, portal receipt)
   domain/                      case schema, decision table, filing preparation (pure, no I/O)
   workflow/                    orchestration: open case, recompute, approve, dispatch
   portal/                      simulated insurer portal (idempotent receipts)

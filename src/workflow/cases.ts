@@ -216,7 +216,10 @@ export async function recompute(db: Db, caseId: string) {
     await tx
       .delete(findings)
       .where(and(eq(findings.caseId, caseId), eq(findings.status, "open"), inArray(findings.rule, DERIVED_RULES)));
-    const derived = [...state.conflicts, ...state.gaps.map((g) => ({ ...g, evidence: [] }))];
+    const derived = [
+      ...state.conflicts,
+      ...state.gaps.map((g) => ({ rule: g.rule, field: g.field, explanation: g.explanation, evidence: [] })),
+    ];
     if (derived.length) {
       await tx.insert(findings).values(derived.map((f) => ({ ...f, caseId, caseRevision: state.case.revision })));
     }

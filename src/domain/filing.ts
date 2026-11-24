@@ -10,7 +10,12 @@ export type ObservationLike = {
   normalized: string | null;
   readability: string;
 };
-export type Gap = { rule: FindingRule; field: RequiredField | null; explanation: string };
+export type Gap = {
+  rule: FindingRule;
+  field: RequiredField | null;
+  explanation: string;
+  document?: "photo" | "estimate"; // set when a whole required document is missing
+};
 
 /** Latest version of each source. Superseded versions stay stored but no longer count. */
 export const currentArtifacts = <A extends ArtifactLike>(all: readonly A[]) =>
@@ -46,7 +51,7 @@ export function prepareFiling(
 
   const gaps: Gap[] = [];
   for (const kind of PARKING_DAMAGE_REQUIRED_KINDS) {
-    if (!current.some((a) => a.kind === kind)) gaps.push({ rule: "missing", field: null, explanation: `No ${kind} received.` });
+    if (!current.some((a) => a.kind === kind)) gaps.push({ rule: "missing", field: null, explanation: `No ${kind} received.`, document: kind });
   }
   for (const field of EXTRACTED_FIELDS) {
     if (ok(field).length) continue;

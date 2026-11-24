@@ -9,7 +9,7 @@ import { getDb } from "../server/db.ts";
 import { extractorFor } from "../server/extractor.ts";
 import { and, eq } from "drizzle-orm";
 import { events } from "../db/schema.ts";
-import { approve, openCase, resumeCase, WorkflowError } from "../workflow/cases.ts";
+import { approve, openCase, resolveConflict, resumeCase, WorkflowError } from "../workflow/cases.ts";
 
 export async function launchFixture(form: FormData) {
   const fixtureId = z.enum(Object.keys(FIXTURE_CASES) as [string, ...string[]]).parse(form.get("fixtureId"));
@@ -46,4 +46,31 @@ export async function resumeExtraction(form: FormData) {
   await resumeCase(db, caseId, await extractorFor(db, fixtureId));
   revalidatePath("/");
   redirect(`/cases/${caseId}`);
+}
+
+/** Broker records a resolution for a material conflict: a reason, and optionally the source that is right. */
+export async function resolveFinding(form: FormData) {
+  const input = z
+    .object({
+      caseId: z.uuid(),
+      findingId: z.uuid(),
+      reason: z.string().trim().min(1).max(1000),
+      acceptedSourceId: z.string().max(64).transform((s) => s || null),
+    })
+    .safeParse({
+      caseId: form.get("caseId"),
+      findingId: form.get("findingId"),
+      reason: form.get("reason"),
+      acceptedSourceId: form.get("acceptedSourceId") ?? "",
+    });
+  const caseId = String(form.get("caseId"));
+  if (!input.success) redirect(`/cases/${z.uuid().safeParse(caseId).success ? caseId : ""}?error=invalid_resolution`);
+  try {
+    await resolveConflict(await getDb(), input.data.caseId, input.data.findingId, input.data);
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(`/cases/${input.data.caseId}?error=${e.code}`);
+    throw e;
+  }
+  revalidatePath("/");
+  redirect(`/cases/${input.data.caseId}`);
 }
