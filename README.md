@@ -97,6 +97,10 @@ Only current versions and legible values count. A conflict sends the case to bro
 - **Resolution:** the broker gives a reason and can name the source that is right (`acceptedSourceId`); only that source's values go into the filing. A resolved conflict stays resolved until its evidence changes version.
 - **Grounding:** a quote that names a direction (`dianteiro`, `traseiro`, …) must match the normalized position, or the model must retry.
 
+### Interrupted extraction
+
+Each file's observations, findings and `extract` event are written in one transaction, and the files are extracted in parallel. If the request dies halfway (timeout, restart, redeploy), the case stays in `intake` with the finished files kept. After 3 minutes without activity, the case page offers **Resume extraction**, which reads only the missing files. Two resumes at once still store each file once.
+
 ### 3. Database and storage
 
 - **PostgreSQL** is the only SQL dialect, configured through `DATABASE_URL`. It runs on any Postgres host: local Docker, Supabase, Neon, AWS RDS, Azure.

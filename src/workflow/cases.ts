@@ -6,7 +6,7 @@ import type { Db } from "../db/client.ts";
 import { approvals, artifacts, cases, events, findings, messages, observations, submissions } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { compareSources, conflictKey } from "../domain/compare.ts";
-import { prepareFiling } from "../domain/filing.ts";
+import { currentArtifacts, prepareFiling } from "../domain/filing.ts";
 import {
   ModelExtraction,
   type ArtifactKind,
@@ -91,7 +91,7 @@ export async function caseView(db: Db, caseId: string) {
 
 export async function openCase(
   db: Db,
-  input: { message: string; artifacts: NewArtifact[] },
+  input: { message: string; artifacts: NewArtifact[]; fixtureId?: string },
   extractor: Extractor,
 ): Promise<string> {
   const c = await db.transaction(async (tx) => {
@@ -111,52 +111,99 @@ export async function openCase(
       body: input.message,
       status: "received",
     });
-    await logEvent(tx, row!, "intake", { detail: { artifacts: input.artifacts.map((a) => a.sourceId) } });
+    await logEvent(tx, row!, "intake", {
+      // fixtureId lets an interrupted fixture case resume with the same fixture data
+      detail: { artifacts: input.artifacts.map((a) => a.sourceId), fixtureId: input.fixtureId ?? null },
+    });
     return row!;
   });
+  await resumeCase(db, c.id, extractor);
+  return c.id;
+}
 
-  // Extraction runs outside the transaction (model calls are slow); results are stored per artifact version.
-  for (const a of input.artifacts) {
-    const started = Date.now();
-    const run = { tool: extractor.name, promptVersion: extractor.promptVersion ?? null };
-    try {
-      const result = await extractor.extract(a);
-      const { observations: proposed } = ModelExtraction.parse({ observations: result.observations });
-      if (proposed.length) {
-        await db.insert(observations).values(proposed.map((o) => ({ ...o, caseId: c.id, sourceId: a.sourceId, version: 1 })));
+/** An `intake` case with no activity for this long was interrupted (crash, timeout, redeploy) and may be resumed. */
+export const STALE_INTAKE_MS = 3 * 60_000;
+
+/**
+ * Extracts every current file that has no `extract` event yet, in parallel, then decides. Safe to call again after a
+ * crash, and safe to run twice at once: each file's result is written in one transaction that first re-checks.
+ */
+export async function resumeCase(db: Db, caseId: string, extractor: Extractor) {
+  const state = await loadCase(db, caseId);
+  if (state.case.status !== "intake") return;
+  const done = await extractedVersions(db, caseId);
+  const pending = currentArtifacts(state.artifacts).filter((a) => !done.has(`${a.sourceId}@${a.version}`));
+
+  const results = await Promise.allSettled(pending.map((a) => extractOne(db, state.case, a, extractor)));
+  const crashed = results.find((r) => r.status === "rejected");
+  if (crashed) throw crashed.reason; // stays in intake; the next resume continues with what is left
+  await recompute(db, caseId);
+}
+
+async function extractedVersions(db: Exec, caseId: string) {
+  const rows = await db
+    .select({ detail: events.detail })
+    .from(events)
+    .where(and(eq(events.caseId, caseId), eq(events.operation, "extract")));
+  return new Set(rows.map((r) => `${r.detail?.sourceId}@${r.detail?.version ?? 1}`));
+}
+
+async function extractOne(db: Db, c: { id: string; revision: number }, a: NewArtifact & { version: number }, extractor: Extractor) {
+  const started = Date.now();
+  const run = { tool: extractor.name, promptVersion: extractor.promptVersion ?? null };
+  type Outcome =
+    | { ok: true; observations: ProposedObservation[]; attempts: number; costEur?: number; model?: string }
+    | { ok: false; category: string; reason: string; attempts: number | null; costEur: number | null };
+  let outcome: Outcome;
+  try {
+    const result = await extractor.extract(a);
+    outcome = { ok: true, ...result, observations: ModelExtraction.parse({ observations: result.observations }).observations };
+  } catch (e) {
+    // Unusable model output never blocks silently: it becomes a finding that routes the case to the broker.
+    const known = e instanceof ExtractionError;
+    outcome = {
+      ok: false,
+      category: known ? e.category : "provider_error",
+      reason: e instanceof Error ? e.message : String(e),
+      attempts: known ? e.attempts : null,
+      costEur: known ? e.costEur : null,
+    };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.select({ id: cases.id }).from(cases).where(eq(cases.id, c.id)).for("update");
+    if ((await extractedVersions(tx, c.id)).has(`${a.sourceId}@${a.version}`)) return; // a parallel resume was faster
+    const base = { ...run, latencyMs: Date.now() - started };
+    if (outcome.ok) {
+      if (outcome.observations.length) {
+        await tx
+          .insert(observations)
+          .values(outcome.observations.map((o) => ({ ...o, caseId: c.id, sourceId: a.sourceId, version: a.version })));
       }
-      await logEvent(db, c, "extract", {
-        ...run,
-        tool: result.model ?? run.tool, // the model that actually answered, e.g. after a fallback
-        costEur: result.costEur ?? null,
-        latencyMs: Date.now() - started,
-        detail: { sourceId: a.sourceId, observations: proposed.length, attempts: result.attempts },
+      await logEvent(tx, c, "extract", {
+        ...base,
+        tool: outcome.model ?? run.tool, // the model that actually answered, e.g. after a fallback
+        costEur: outcome.costEur ?? null,
+        detail: { sourceId: a.sourceId, version: a.version, observations: outcome.observations.length, attempts: outcome.attempts },
       });
-    } catch (e) {
-      // Unusable model output never blocks silently: it becomes a finding that routes the case to the broker.
-      const category = e instanceof ExtractionError ? e.category : "invalid_output";
-      const reason = e instanceof Error ? e.message : String(e);
-      await db.insert(findings).values({
+    } else {
+      await tx.insert(findings).values({
         caseId: c.id,
         caseRevision: c.revision,
         rule: "invalid_extraction",
         field: null,
         evidence: [],
-        explanation: `${a.sourceId}: extraction failed (${category}). ${reason}`.slice(0, 500),
+        explanation: `${a.sourceId}: extraction failed (${outcome.category}). ${outcome.reason}`.slice(0, 500),
       });
-      await logEvent(db, c, "extract", {
-        ...run,
+      await logEvent(tx, c, "extract", {
+        ...base,
         result: "error",
-        errorCategory: category,
-        costEur: e instanceof ExtractionError ? e.costEur : null,
-        latencyMs: Date.now() - started,
-        detail: { sourceId: a.sourceId, attempts: e instanceof ExtractionError ? e.attempts : null },
+        errorCategory: outcome.category,
+        costEur: outcome.costEur,
+        detail: { sourceId: a.sourceId, version: a.version, attempts: outcome.attempts },
       });
     }
-  }
-
-  await recompute(db, c.id);
-  return c.id;
+  });
 }
 
 /** Re-derive findings and status from stored evidence. Safe to call any time before submission. */

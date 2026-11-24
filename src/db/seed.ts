@@ -5,7 +5,7 @@ import { openDb } from "./client.ts";
 
 const { db, close } = await openDb();
 for (const fixtureId of Object.keys(FIXTURE_CASES)) {
-  const id = await openCase(db, FIXTURE_CASES[fixtureId]!, await extractorFor(db, fixtureId));
+  const id = await openCase(db, { ...FIXTURE_CASES[fixtureId]!, fixtureId }, await extractorFor(db, fixtureId));
   console.log(`seeded ${fixtureId} → /cases/${id}`);
 }
 await close();

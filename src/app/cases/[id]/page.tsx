@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import type { Locator } from "../../../domain/schema.ts";
 import { getDb } from "../../../server/db.ts";
-import { caseView, WorkflowError } from "../../../workflow/cases.ts";
-import { approveCase } from "../../actions.ts";
+import { caseView, STALE_INTAKE_MS, WorkflowError } from "../../../workflow/cases.ts";
+import { approveCase, resumeExtraction } from "../../actions.ts";
 import { fmt, STATUS } from "../../status.ts";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +41,17 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
       </div>
 
       {error && <p className="notice">{ERRORS[error] ?? error}</p>}
+
+      {c.status === "intake" &&
+        (Date.now() - (view.events.at(-1)?.createdAt ?? c.updatedAt).getTime() > STALE_INTAKE_MS ? (
+          <form action={resumeExtraction} className="notice">
+            <input type="hidden" name="caseId" value={c.id} />
+            Extraction stopped before it finished (for example after a restart). Files already read are kept.{" "}
+            <button>Resume extraction</button>
+          </form>
+        ) : (
+          <p className="notice">Extraction is running. Reload in a moment.</p>
+        ))}
 
       <div className="grid">
         <section>
