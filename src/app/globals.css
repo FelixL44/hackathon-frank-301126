@@ -69,3 +69,12 @@ th { color: var(--muted); font-weight: 500; }
 button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text); cursor: pointer; }
 button.secondary { background: transparent; color: var(--accent); }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+mark { background: var(--warn-bg); color: var(--warn-text); padding: 0 2px; border-radius: 3px; }
+.viewer { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 900px) { .viewer { grid-template-columns: 3fr 2fr; } }
+.viewer iframe { width: 100%; height: 70vh; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.viewer img { max-width: 100%; border-radius: 6px; border: 1px solid var(--border); }
+.pagetext { white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; }
+textarea { width: 100%; font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; }

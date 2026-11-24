@@ -1,17 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
+import { recipientFor } from "../../../domain/questions.ts";
 import type { Locator } from "../../../domain/schema.ts";
 import { getDb } from "../../../server/db.ts";
 import { caseView, STALE_INTAKE_MS, WorkflowError } from "../../../workflow/cases.ts";
-import { approveCase, resumeExtraction } from "../../actions.ts";
-import { fmt, STATUS } from "../../status.ts";
+import { approveCase, resolveFinding, resumeExtraction } from "../../actions.ts";
+import { fmt, sourceHref, STATUS } from "../../status.ts";
 
 export const dynamic = "force-dynamic";
 
 const ERRORS: Record<string, string> = {
   stale_approval: "This revision is no longer current. Review the new evidence before approving.",
   not_ready: "The case is not ready for approval.",
+  invalid_resolution: "A resolution needs a reason, and the accepted source must be one of the cited sources.",
 };
 
 const where = (l: Locator) => (l.type === "text" ? `p. ${l.page}: “${l.quote}”` : `${l.imageId}: ${l.description}`);
@@ -26,6 +28,7 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
   });
   const { case: c, filing, submission, approval } = view;
   const customerMessage = view.messages.find((m) => m.direction === "inbound" && m.role === "customer");
+  const lastDecision = view.events.findLast((e) => e.operation === "decide")?.detail as { rule?: string } | undefined;
 
   return (
     <main>
@@ -53,6 +56,25 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
           <p className="notice">Extraction is running. Reload in a moment.</p>
         ))}
 
+      {(c.status === "broker_review" || c.status === "awaiting_information") && (
+        <div className="card">
+          <h2>Next step · {STATUS[c.status].actor}</h2>
+          <p className="muted">Why: {lastDecision?.rule ?? "see findings"}</p>
+          {c.status === "awaiting_information" ? (
+            <ul>
+              {view.gaps.map((g, i) => (
+                <li key={i}>
+                  Ask the <strong>{recipientFor(g)}</strong>: {g.explanation}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Resolve each open conflict below with a reason, or ask for a corrected document.</p>
+          )}
+          <p className="muted">Sending the question through the demo inbox comes with HAC-11.</p>
+        </div>
+      )}
+
       <div className="grid">
         <section>
           <div className="card">
@@ -66,10 +88,11 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
             <ul>
               {view.artifacts.map((a) => (
                 <li key={`${a.sourceId}-${a.version}`} id={`src-${a.sourceId}-v${a.version}`}>
-                  <strong>{a.sourceId}</strong> v{a.version} · {a.kind}
+                  <Link href={sourceHref(c.id, a)}>
+                    <strong>{a.sourceId}</strong> v{a.version}
+                  </Link>{" "}
+                  · {a.kind}
                   {a.supersedesVersion && <> · replaces v{a.supersedesVersion}</>}
-                  <br />
-                  <span className="muted">{a.objectKey} (source viewer: HAC-10)</span>
                 </li>
               ))}
             </ul>
@@ -90,13 +113,32 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
                       <ul>
                         {f.evidence.map((e, i) => (
                           <li key={i}>
-                            <a href={`#src-${e.sourceId}-v${e.version}`}>
+                            <Link href={sourceHref(c.id, e)}>
                               {e.sourceId} v{e.version}
-                            </a>{" "}
+                            </Link>{" "}
                             <span className="muted">{where(e.locator)}</span>
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {f.rule === "conflict" && f.status === "open" && (
+                      <form action={resolveFinding}>
+                        <input type="hidden" name="caseId" value={c.id} />
+                        <input type="hidden" name="findingId" value={f.id} />
+                        <fieldset>
+                          <legend>Which source is right?</legend>
+                          {[...new Set(f.evidence.map((e) => e.sourceId))].map((sourceId) => (
+                            <label key={sourceId} style={{ display: "block" }}>
+                              <input type="radio" name="acceptedSourceId" value={sourceId} required /> {sourceId}
+                            </label>
+                          ))}
+                          <label style={{ display: "block" }}>
+                            <input type="radio" name="acceptedSourceId" value="" /> Both (separate damages)
+                          </label>
+                        </fieldset>
+                        <textarea name="reason" rows={2} required maxLength={1000} placeholder="Reason, e.g. workshop confirmed by phone" />
+                        <button>Record resolution</button>
+                      </form>
                     )}
                     {f.status === "resolved" && (
                       <div className="muted">
@@ -129,7 +171,9 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
                       {o.normalized && o.normalized !== o.value && <div className="muted">→ {o.normalized}</div>}
                     </td>
                     <td>
-                      {o.sourceId} v{o.version}
+                      <Link href={sourceHref(c.id, o)}>
+                        {o.sourceId} v{o.version}
+                      </Link>
                       <div className="muted">{where(o.locator)}</div>
                     </td>
                   </tr>
