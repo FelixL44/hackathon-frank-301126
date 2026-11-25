@@ -9,7 +9,10 @@ import { getDb } from "../server/db.ts";
 import { extractorFor } from "../server/extractor.ts";
 import { and, eq } from "drizzle-orm";
 import { events } from "../db/schema.ts";
-import { approve, openCase, resolveConflict, resumeCase, WorkflowError } from "../workflow/cases.ts";
+import { RequestTopic } from "../domain/customer-request.ts";
+import { draftCustomerRequest, finishCustomerRequest } from "../workflow/customer-requests.ts";
+import { approve, openCase, resolveConflict, resumeCase, retryExtraction, WorkflowError } from "../workflow/cases.ts";
+import { caseHref } from "./case-navigation.ts";
 
 export async function launchFixture(form: FormData) {
   const fixtureId = z.enum(Object.keys(FIXTURE_CASES) as [string, ...string[]]).parse(form.get("fixtureId"));
@@ -27,25 +30,34 @@ export async function approveCase(form: FormData) {
   try {
     await approve(db, caseId, revision, simulatedPortal(db));
   } catch (e) {
-    if (e instanceof WorkflowError) redirect(`/cases/${caseId}?error=${e.code}`);
+    if (e instanceof WorkflowError) redirect(caseHref(caseId, { from: form.get("from"), error: e.code }));
     throw e;
   }
   revalidatePath("/");
-  redirect(`/cases/${caseId}`);
+  redirect(caseHref(caseId, { from: form.get("from") }));
 }
 
-/** Continues an interrupted extraction with the same fixture (or the configured model) and the budget check. */
+/** Continues interrupted extraction or retries failed files for the displayed case revision. */
 export async function resumeExtraction(form: FormData) {
-  const caseId = z.uuid().parse(form.get("caseId"));
+  const { caseId, revision } = z.object({
+    caseId: z.uuid(), revision: z.coerce.number().int().min(1).optional(),
+  }).parse({ caseId: form.get("caseId"), revision: form.get("revision") ?? undefined });
   const db = await getDb();
   const [intake] = await db
     .select({ detail: events.detail })
     .from(events)
     .where(and(eq(events.caseId, caseId), eq(events.operation, "intake")));
   const fixtureId = String(intake?.detail?.fixtureId ?? "");
-  await resumeCase(db, caseId, await extractorFor(db, fixtureId));
+  const extractor = await extractorFor(db, fixtureId);
+  try {
+    if (revision) await retryExtraction(db, caseId, revision, extractor);
+    else await resumeCase(db, caseId, extractor);
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(caseHref(caseId, { from: form.get("from"), error: e.code }));
+    throw e;
+  }
   revalidatePath("/");
-  redirect(`/cases/${caseId}`);
+  redirect(caseHref(caseId, { from: form.get("from") }));
 }
 
 /** Broker records a resolution for a material conflict: a reason, and optionally the source that is right. */
@@ -64,13 +76,53 @@ export async function resolveFinding(form: FormData) {
       acceptedSourceId: form.get("acceptedSourceId") ?? "",
     });
   const caseId = String(form.get("caseId"));
-  if (!input.success) redirect(`/cases/${z.uuid().safeParse(caseId).success ? caseId : ""}?error=invalid_resolution`);
+  if (!input.success) {
+    const validId = z.uuid().safeParse(caseId).data;
+    redirect(validId ? caseHref(validId, { from: form.get("from"), error: "invalid_resolution" }) : "/");
+  }
   try {
     await resolveConflict(await getDb(), input.data.caseId, input.data.findingId, input.data);
   } catch (e) {
-    if (e instanceof WorkflowError) redirect(`/cases/${input.data.caseId}?error=${e.code}`);
+    if (e instanceof WorkflowError) redirect(caseHref(input.data.caseId, { from: form.get("from"), error: e.code }));
     throw e;
   }
   revalidatePath("/");
-  redirect(`/cases/${input.data.caseId}`);
+  redirect(caseHref(input.data.caseId, { from: form.get("from") }));
+}
+
+const requestTarget = z.object({ caseId: z.uuid(), revision: z.coerce.number().int().positive() });
+
+export async function createRequestDraft(form: FormData) {
+  const target = requestTarget.parse(Object.fromEntries(form));
+  const topic = RequestTopic.parse(form.get("topic"));
+  const location = { from: form.get("from"), tab: "messages", topic, anchor: "customer-request" } as const;
+  const instruction = z.string().trim().max(500).safeParse(form.get("instruction") ?? "");
+  if (!instruction.success || (topic === "other" && !instruction.data)) {
+    redirect(caseHref(target.caseId, { ...location, error: "invalid_request" }));
+  }
+  try {
+    await draftCustomerRequest(await getDb(), { ...target, topic, instruction: instruction.data });
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(caseHref(target.caseId, { ...location, error: e.code }));
+    throw e;
+  }
+  revalidatePath("/");
+  redirect(caseHref(target.caseId, location));
+}
+
+export async function confirmRequestDraft(form: FormData) {
+  const target = requestTarget.parse(Object.fromEntries(form));
+  const draftId = z.uuid().parse(form.get("draftId"));
+  const location = { from: form.get("from"), tab: "messages", anchor: "customer-request" } as const;
+  const intent = z.enum(["send", "discard"]).parse(form.get("intent"));
+  const body = intent === "send" ? z.string().trim().min(1).max(2000).safeParse(form.get("body")) : null;
+  if (body && !body.success) redirect(caseHref(target.caseId, { ...location, error: "invalid_request" }));
+  try {
+    await finishCustomerRequest(await getDb(), { ...target, draftId, body: body?.data ?? null });
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(caseHref(target.caseId, { ...location, error: e.code }));
+    throw e;
+  }
+  revalidatePath("/");
+  redirect(caseHref(target.caseId, location));
 }
