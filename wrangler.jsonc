@@ -2,7 +2,7 @@
 // Secrets (never in this file): wrangler secret put DATABASE_URL, plus model keys if a provider is used.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "claim-intake",
+  "name": "frank-claims",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
