@@ -114,15 +114,18 @@ export async function confirmRequestDraft(form: FormData) {
   const target = requestTarget.parse(Object.fromEntries(form));
   const draftId = z.uuid().parse(form.get("draftId"));
   const location = { from: form.get("from"), tab: "messages", anchor: "customer-request" } as const;
+  // The WhatsApp outbox sends the same drafts and returns there instead of to the case.
+  const back = (error?: string) => form.get("returnTo") === "/whatsapp"
+    ? `/whatsapp${error ? `?error=${error}` : ""}` : caseHref(target.caseId, { ...location, error });
   const intent = z.enum(["send", "discard"]).parse(form.get("intent"));
   const body = intent === "send" ? z.string().trim().min(1).max(2000).safeParse(form.get("body")) : null;
-  if (body && !body.success) redirect(caseHref(target.caseId, { ...location, error: "invalid_request" }));
+  if (body && !body.success) redirect(back("invalid_request"));
   try {
     await finishCustomerRequest(await getDb(), { ...target, draftId, body: body?.data ?? null });
   } catch (e) {
-    if (e instanceof WorkflowError) redirect(caseHref(target.caseId, { ...location, error: e.code }));
+    if (e instanceof WorkflowError) redirect(back(e.code));
     throw e;
   }
   revalidatePath("/");
-  redirect(caseHref(target.caseId, location));
+  redirect(back());
 }
