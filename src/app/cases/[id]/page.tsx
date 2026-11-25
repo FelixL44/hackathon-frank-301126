@@ -123,7 +123,7 @@ export default async function CasePage({ params, searchParams }: {
     if (e instanceof WorkflowError && e.code === "not_found") notFound();
     throw e;
   });
-  const { case: c, filing, submission, approval } = view;
+  const { case: c, filing, submission } = view;
   const conversation = view.messages.filter((m) => m.role !== "broker" &&
     (m.direction === "inbound" || m.status === "sent"));
   const latestReport = conversation.findLast((m) => m.direction === "inbound" && m.role === "customer");
@@ -251,14 +251,14 @@ export default async function CasePage({ params, searchParams }: {
                 <details><summary>View exact payload</summary><pre>{JSON.stringify(filing, null, 2)}</pre></details>
               </div>
             )}
-            {approval && !canApprove && (
+            {submission && !canApprove && (
               <div className="card review-panel">
-                <h2 className="case-card-title"><FileText size={20} aria-hidden="true" /> Approved filing <span className="badge">Revision {approval.revision}</span></h2>
-                <FilingPreview filing={approval.payload} />
-                <details><summary>View approved payload</summary><pre>{JSON.stringify(approval.payload, null, 2)}</pre></details>
+                <h2 className="case-card-title"><FileText size={20} aria-hidden="true" /> Approved filing <span className="badge">Revision {submission.approvedRevision}</span></h2>
+                <FilingPreview filing={submission.payload} />
+                <details><summary>View approved payload</summary><pre>{JSON.stringify(submission.payload, null, 2)}</pre></details>
               </div>
             )}
-            {((!canApprove && !approval) || openFindings.length > 0 || resolved.length > 0) && (
+            {((!canApprove && !submission) || openFindings.length > 0 || resolved.length > 0) && (
               <div className="card review-panel" id="agent-assessment">
                 <h2 className="case-card-title"><ClipboardCheck size={20} aria-hidden="true" /> Agent assessment {openFindings.length > 0 && <span className="badge broker_review">{openFindings.length} open</span>}</h2>
                 {openFindings.length ? (

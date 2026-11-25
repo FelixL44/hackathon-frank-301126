@@ -7,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { eq } from "drizzle-orm";
 import { openDb, type Db } from "./client.ts";
-import { approvals, artifacts, cases, messages, observations, submissions } from "./schema.ts";
+import { artifacts, cases, messages, observations, submissions } from "./schema.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -76,19 +76,13 @@ test("replayed inbound event is stored once", async () => {
   assert.equal(replay.length, 0);
 });
 
-test("double approval click creates one approval", async () => {
-  const c = await newCase("CLM-APR");
-  const approval = { caseId: c.id, revision: 1, approvedBy: "demo-broker", payload: filing };
-  assert.equal((await db.insert(approvals).values(approval).onConflictDoNothing().returning()).length, 1);
-  assert.equal((await db.insert(approvals).values(approval).onConflictDoNothing().returning()).length, 0);
-});
-
-test("one submission per approved revision", async () => {
+test("double approval click creates one approval + submission row", async () => {
   const c = await newCase("CLM-SUB");
-  await db.insert(submissions).values({ caseId: c.id, approvedRevision: 1, idempotencyKey: `${c.id}:1` });
-  await assert.rejects(
-    db.insert(submissions).values({ caseId: c.id, approvedRevision: 1, idempotencyKey: `${c.id}:1-again` }),
-  );
+  const row = { caseId: c.id, approvedRevision: 1, approvedBy: "demo-broker", payload: filing, idempotencyKey: `${c.id}:1` };
+  assert.equal((await db.insert(submissions).values(row).onConflictDoNothing().returning()).length, 1);
+  assert.equal((await db.insert(submissions).values(row).onConflictDoNothing().returning()).length, 0);
+  // the same revision with a different key is still rejected: one submission per approved revision
+  await assert.rejects(db.insert(submissions).values({ ...row, idempotencyKey: `${c.id}:1-again` }));
 });
 
 test("failed transaction leaves no partial state", async () => {

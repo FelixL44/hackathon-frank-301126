@@ -118,37 +118,18 @@ export const messages = pgTable(
   (t) => [unique("messages_inbound_dedupe").on(t.channel, t.externalEventId)],
 ).enableRLS();
 
-export const tasks = pgTable("tasks", {
-  id: id(),
-  caseId: caseId(),
-  caseRevision: integer("case_revision").notNull(),
-  kind: text("kind", { enum: ["review_conflict", "review_invalid_extraction", "submission_failed"] }).notNull(),
-  findingIds: jsonb("finding_ids").$type<string[]>().notNull().default([]),
-  status: text("status", { enum: ["open", "done"] }).notNull().default("open"),
-  createdAt: createdAt(),
-}).enableRLS();
-
-/** One approval per case revision: a double click hits the unique key and creates no second row. */
-export const approvals = pgTable(
-  "approvals",
-  {
-    id: id(),
-    caseId: caseId(),
-    revision: integer("revision").notNull(),
-    approvedBy: text("approved_by").notNull(),
-    payload: jsonb("payload").$type<ClaimFiling>().notNull(), // frozen snapshot
-    createdAt: createdAt(),
-  },
-  (t) => [unique("approvals_one_per_revision").on(t.caseId, t.revision)],
-).enableRLS();
-
-/** Submission outbox: one row per approved revision, retried with the same idempotency key. */
+/**
+ * The broker's approval of one revision and its submission outbox in one row. A double click hits the unique key and
+ * creates nothing; retries reuse the same idempotency key.
+ */
 export const submissions = pgTable(
   "submissions",
   {
     id: id(),
     caseId: caseId(),
     approvedRevision: integer("approved_revision").notNull(),
+    approvedBy: text("approved_by").notNull(),
+    payload: jsonb("payload").$type<ClaimFiling>().notNull(), // frozen at approval
     idempotencyKey: text("idempotency_key").notNull().unique(),
     status: text("status", { enum: ["pending", "succeeded", "failed"] }).notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),

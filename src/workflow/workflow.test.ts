@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { FIXTURE_CASES, fixtureExtractor } from "../../fixtures/cases.ts";
 import { openDb, type Db } from "../db/client.ts";
-import { approvals, cases, observations, portalReceipts, submissions } from "../db/schema.ts";
+import { cases, observations, portalReceipts, submissions } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { simulatedPortal } from "../portal/simulated.ts";
 import { ExtractionError } from "../extraction/model-extractor.ts";
@@ -21,8 +21,7 @@ before(async () => {
 after(() => close());
 
 const openF1 = () => openCase(db, FIXTURE_CASES["F1-consistent"]!, fixtureExtractor("F1-consistent"));
-const count = async (table: typeof approvals | typeof submissions, caseId: string) =>
-  (await db.select().from(table).where(eq(table.caseId, caseId))).length;
+const count = async (caseId: string) => (await db.select().from(submissions).where(eq(submissions.caseId, caseId))).length;
 
 test("decision table: first matching rule wins", () => {
   assert.equal(decide([]).status, "awaiting_approval");
@@ -47,8 +46,8 @@ test("approval submits once and stores the portal receipt; a double click change
   const [sub] = await db.select().from(submissions).where(eq(submissions.caseId, id));
   assert.equal(sub!.status, "succeeded");
   assert.match(sub!.portalReference!, /^SIM-/);
-  assert.equal(await count(approvals, id), 1);
-  assert.equal(await count(submissions, id), 1);
+  assert.equal(await count(id), 1); // one approval + submission row
+  assert.equal(sub!.approvedBy, "demo-broker");
   const receipts = await db.select().from(portalReceipts).where(eq(portalReceipts.idempotencyKey, sub!.idempotencyKey));
   assert.equal(receipts.length, 1);
   assert.equal((await loadCase(db, id)).case.status, "submitted");
@@ -68,7 +67,7 @@ test("approving a stale revision is rejected and submits nothing", async () => {
   await assert.rejects(approve(db, id, 1, simulatedPortal(db)), (e: unknown) => {
     return e instanceof WorkflowError && e.code === "stale_approval";
   });
-  assert.equal(await count(submissions, id), 0);
+  assert.equal(await count(id), 0);
 });
 
 test("failed extraction routes to broker review with the reason, and recompute keeps it", async () => {
