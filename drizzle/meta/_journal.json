@@ -36,6 +36,13 @@
       "when": 1795556106702,
       "tag": "0004_merge_approvals_into_submissions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795610988230,
+      "tag": "0005_customers_and_assignment",
+      "breakpoints": true
     }
   ]
 }

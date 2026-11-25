@@ -27,6 +27,24 @@ const caseId = () =>
     .notNull()
     .references(() => cases.id);
 
+/** Customer channels (HAC-11). The broker works only in the web app. */
+export const CHANNELS = ["demo", "web", "whatsapp", "teams", "telegram"] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+/** Whoever reports the damage. `address` is how the channel reaches them, e.g. a WhatsApp number. */
+export const customers = pgTable(
+  "customers",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    channel: text("channel", { enum: CHANNELS }).notNull(),
+    address: text("address").notNull(),
+    createdAt: createdAt(),
+  },
+  // An inbound WhatsApp message finds its customer by number.
+  (t) => [unique("customers_one_per_address").on(t.channel, t.address)],
+).enableRLS();
+
 export const cases = pgTable("cases", {
   id: id(),
   reference: text("reference").notNull().unique(),
@@ -35,6 +53,8 @@ export const cases = pgTable("cases", {
   replyToken: text("reply_token").notNull().unique(),
   policyReference: text("policy_reference"),
   vehicleId: text("vehicle_id"),
+  customerId: uuid("customer_id").references(() => customers.id), // null for cases opened before HAC-35
+  assignedTo: text("assigned_to"), // broker identity; null = unassigned
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }).enableRLS();
@@ -104,7 +124,7 @@ export const messages = pgTable(
     id: id(),
     caseId: caseId(),
     direction: text("direction", { enum: ["inbound", "outbound"] }).notNull(),
-    channel: text("channel", { enum: ["demo", "email", "slack", "teams"] }).notNull(),
+    channel: text("channel", { enum: CHANNELS }).notNull(),
     role: text("role", { enum: ["customer", "workshop", "broker"] }).notNull(), // sender (inbound) or recipient (outbound)
     body: text("body").notNull(),
     externalEventId: text("external_event_id"), // inbound: provider event ID, dedupe key

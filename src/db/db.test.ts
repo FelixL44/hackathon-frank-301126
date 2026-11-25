@@ -7,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { eq } from "drizzle-orm";
 import { openDb, type Db } from "./client.ts";
-import { artifacts, cases, messages, observations, submissions } from "./schema.ts";
+import { artifacts, cases, customers, messages, observations, submissions } from "./schema.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -83,6 +83,13 @@ test("double approval click creates one approval + submission row", async () => 
   assert.equal((await db.insert(submissions).values(row).onConflictDoNothing().returning()).length, 0);
   // the same revision with a different key is still rejected: one submission per approved revision
   await assert.rejects(db.insert(submissions).values({ ...row, idempotencyKey: `${c.id}:1-again` }));
+});
+
+test("one customer per channel address", async () => {
+  const ana = { name: "Ana", channel: "whatsapp" as const, address: "+351900000099" };
+  await db.insert(customers).values(ana);
+  await assert.rejects(db.insert(customers).values({ ...ana, name: "Someone else" }));
+  await db.insert(customers).values({ ...ana, channel: "telegram" }); // same address on another channel is another account
 });
 
 test("failed transaction leaves no partial state", async () => {
