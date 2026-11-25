@@ -124,8 +124,62 @@ export default async function CasePage({ params, searchParams }: {
     throw e;
   });
   const { case: c, filing, submission } = view;
-  const customerMessage = view.messages.find((m) => m.direction === "inbound" && m.role === "customer");
-  const lastDecision = view.events.findLast((e) => e.operation === "decide")?.detail as { rule?: string } | undefined;
+  const conversation = view.messages.filter((m) => m.role !== "broker" &&
+    (m.direction === "inbound" || m.status === "sent"));
+  const latestReport = conversation.findLast((m) => m.direction === "inbound" && m.role === "customer");
+  const contacted = conversation.some((m) => m.status === "sent" && m.requestKey?.startsWith(sentKey(c.revision)));
+  const draft = view.messages.find((m) => m.status === "draft" && m.requestKey?.startsWith(draftKey(c.revision)));
+  const errorMessage = typeof search.error === "string" && Object.hasOwn(ERRORS, search.error) ? ERRORS[search.error] : undefined;
+  const canRequest = c.status === "broker_review" || c.status === "awaiting_information";
+  const current = currentArtifacts(view.artifacts);
+  const archived = view.artifacts.filter((a) => !current.includes(a));
+  const openFindings = view.findings.filter((f) => f.status === "open");
+  const resolved = view.findings.filter((f) => f.status === "resolved");
+  const hasConflict = openFindings.some((finding) => finding.rule === "conflict");
+  const estimateConflict = openFindings.some((finding) => finding.rule === "conflict" &&
+    finding.evidence.some((e) => current.some((a) => a.sourceId === e.sourceId && a.kind === "estimate")));
+  const suggestedTopic = estimateConflict || view.gaps.some((gap) => gap.document === "estimate")
+    ? "corrected_estimate"
+    : view.gaps.some((gap) => gap.document === "photo" || gap.field === "damagedArea")
+      ? "clearer_photo"
+      : view.gaps.some((gap) => gap.field === "policyReference" || gap.field === "vehicleId")
+        ? "policy_details"
+        : "other";
+  const topic = RequestTopic.safeParse(search.topic).data ?? suggestedTopic;
+  const interrupted = c.status === "intake" &&
+    Date.now() - (view.events.at(-1)?.createdAt ?? c.updatedAt).getTime() > STALE_INTAKE_MS;
+  const canApprove = c.status === "awaiting_approval" && filing !== null;
+  const facts = usableCurrent(view.artifacts, view.observations);
+  const summary = (["policyReference", "vehicleId", "incidentDate"] as const).map((field) => ({
+    label: FIELD_LABELS[field],
+    value: openFindings.some((f) => f.rule === "conflict" && f.field === field) ? "Disputed" :
+      facts.find((o) => o.field === field)?.value ?? "Unknown",
+  }));
+  const href = (nextTab: CaseTab, anchor?: string) => caseHref(id, { from, tab: nextTab, anchor });
+  const requestHref = caseHref(id, { from, tab: "messages", topic: suggestedTopic, anchor: "customer-request" });
+  const handler = caseActor(c.status, contacted);
+  const openReviewHref = href("review", "agent-assessment");
+
+  const step = describeStep(view, { canApprove, contacted, hasConflict, interrupted });
+  const StepIcon = step.icon;
+
+  const sourceList = (artifacts: typeof view.artifacts) => (
+    <ul className="source-register">
+      {artifacts.map((artifact) => {
+        const source = SOURCES[artifact.kind];
+        const Icon = source.icon;
+        return (
+          <li key={`${artifact.sourceId}-${artifact.version}`}>
+            <Link href={sourceHref(c.id, artifact, from)}>
+              <span className="icon-tile"><Icon size={17} aria-hidden="true" /></span>
+              <span><strong>{source.label}</strong><small>{artifact.sourceId} · v{artifact.version}</small></span>
+              <ArrowUpRight size={16} aria-hidden="true" />
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
 
   return (
     <BrokerShell returnTo={from}>
@@ -197,14 +251,14 @@ export default async function CasePage({ params, searchParams }: {
                 <details><summary>View exact payload</summary><pre>{JSON.stringify(filing, null, 2)}</pre></details>
               </div>
             )}
-            {approval && !canApprove && (
+            {submission && !canApprove && (
               <div className="card review-panel">
-                <h2 className="case-card-title"><FileText size={20} aria-hidden="true" /> Approved filing <span className="badge">Revision {approval.revision}</span></h2>
-                <FilingPreview filing={approval.payload} />
-                <details><summary>View approved payload</summary><pre>{JSON.stringify(approval.payload, null, 2)}</pre></details>
+                <h2 className="case-card-title"><FileText size={20} aria-hidden="true" /> Approved filing <span className="badge">Revision {submission.approvedRevision}</span></h2>
+                <FilingPreview filing={submission.payload} />
+                <details><summary>View approved payload</summary><pre>{JSON.stringify(submission.payload, null, 2)}</pre></details>
               </div>
             )}
-            {((!canApprove && !approval) || openFindings.length > 0 || resolved.length > 0) && (
+            {((!canApprove && !submission) || openFindings.length > 0 || resolved.length > 0) && (
               <div className="card review-panel" id="agent-assessment">
                 <h2 className="case-card-title"><ClipboardCheck size={20} aria-hidden="true" /> Agent assessment {openFindings.length > 0 && <span className="badge broker_review">{openFindings.length} open</span>}</h2>
                 {openFindings.length ? (
@@ -301,73 +355,37 @@ export default async function CasePage({ params, searchParams }: {
                     <p>{m.body}</p>
                   </li>
                 ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="card scroll">
-            <h2>Observations</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Field</th>
-                  <th>Value</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.observations.map((o) => (
-                  <tr key={o.id}>
-                    <td>{o.field}</td>
-                    <td>
-                      {o.value ?? <em>unknown</em>}
-                      {o.normalized && o.normalized !== o.value && <div className="muted">→ {o.normalized}</div>}
-                    </td>
-                    <td>
-                      <Link href={sourceHref(c.id, o)}>
-                        {o.sourceId} v{o.version}
-                      </Link>
-                      <div className="muted">{where(o.locator)}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {c.status === "awaiting_approval" && filing && (
-            <div className="card">
-              <h2>Prepared filing · revision {c.revision}</h2>
-              <pre>{JSON.stringify(filing, null, 2)}</pre>
-              <form action={approveCase} style={{ marginTop: 12 }}>
-                <input type="hidden" name="caseId" value={c.id} />
-                <input type="hidden" name="revision" value={c.revision} />
-                <button>Approve revision {c.revision} and submit</button>
-              </form>
-            </div>
-          )}
-
-          {submission && (
-            <div className="card">
-              <h2>
-                Submission <span className="badge sim">simulated portal</span>
-              </h2>
-              {submission.portalReference ? (
-                <p className="notice ok">
-                  Filed as <Link href={`/portal/${submission.portalReference}`}>{submission.portalReference}</Link> · revision{" "}
-                  {submission.approvedRevision} approved by {submission.approvedBy} at {fmt(submission.createdAt)}
-                </p>
+              </ol>
+            ) : <p className="muted">No messages yet.</p>}
+          </section>
+          {canRequest && (
+            <section className="card review-panel case-draft" id="customer-request">
+              <h2 className="case-card-title">{draft ? "Review message draft" : "Prepare a request"}</h2>
+              {errorMessage && <p className="notice error" role="alert">{errorMessage}</p>}
+              {draft ? (
+                <form action={confirmRequestDraft} key={draft.id}>
+                  <CaseFields id={id} revision={c.revision} from={from} />
+                  <input type="hidden" name="draftId" value={draft.id} />
+                  <label htmlFor="request-body">Message to customer</label>
+                  <textarea id="request-body" name="body" rows={9} defaultValue={draft.body} maxLength={2000} required />
+                  <div className="case-actions">
+                    <ActionButton name="intent" value="send" pendingLabel="Sending…">Confirm and send</ActionButton>
+                    <ActionButton className="secondary" name="intent" value="discard" formNoValidate>Discard</ActionButton>
+                  </div>
+                </form>
               ) : (
-                <p className="notice">
-                  Pending · {submission.attempts} attempt(s)
-                  {submission.lastErrorCategory && <> · last error: {submission.lastErrorCategory}</>}
-                </p>
+                <form action={createRequestDraft}>
+                  <CaseFields id={id} revision={c.revision} from={from} />
+                  <label htmlFor="request-topic">Request type</label>
+                  <select id="request-topic" name="topic" defaultValue={topic}>
+                    {Object.entries(REQUEST_TOPICS).map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
+                  </select>
+                  <label htmlFor="request-instruction">Short instruction <span className="muted">(optional for presets)</span></label>
+                  <textarea id="request-instruction" name="instruction" rows={3} maxLength={500} />
+                  <ActionButton pendingLabel="Preparing…">Create draft</ActionButton>
+                </form>
               )}
-              <details>
-                <summary>Submitted payload (frozen at approval)</summary>
-                <pre>{JSON.stringify(submission.payload, null, 2)}</pre>
-              </details>
-            </div>
+            </section>
           )}
         </div>
       )}
