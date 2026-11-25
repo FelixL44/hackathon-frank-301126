@@ -1,0 +1,11 @@
+// Cloudflare Worker for the broker app, built by OpenNext (npm run cf:deploy).
+// Secrets (never in this file): wrangler secret put DATABASE_URL, plus model keys if a provider is used.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "claim-intake",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true }
+}
