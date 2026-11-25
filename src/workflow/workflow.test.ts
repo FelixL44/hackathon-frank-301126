@@ -38,6 +38,16 @@ test("F1: consistent claim waits for broker approval with a valid filing", async
   assert.equal(state.case.policyReference, "POL-2026-000123");
 });
 
+test("a returning customer keeps one row and sees all their cases; new cases are assigned to the broker", async () => {
+  const first = await caseView(db, await openF1());
+  const second = await caseView(db, await openCase(db, FIXTURE_CASES["F3-front-rear-conflict"]!, fixtureExtractor("F3-front-rear-conflict")));
+  assert.equal(first.customer?.name, "Ana Ferreira");
+  assert.equal(second.customer?.id, first.customer?.id);
+  assert.equal(first.case.assignedTo, "demo-broker");
+  const own = await db.select().from(cases).where(eq(cases.customerId, first.customer!.id));
+  assert.ok(own.length >= 2);
+});
+
 test("approval submits once and stores the portal receipt; a double click changes nothing", async () => {
   const id = await openF1();
   const portal = simulatedPortal(db);

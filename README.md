@@ -146,6 +146,20 @@ Each file's observations, findings and `extract` event are written in one transa
 - If `DATABASE_URL` is not set, the app uses in-process **PGlite** for tests and zero-setup local runs.
 - The ORM and migrations are **Drizzle**. All queries live in `src/db/`.
 - Several dialects (MySQL, SQLite, MongoDB) are deliberately not supported. Reliability depends on transactions, unique constraints, row locks and JSONB, and every extra dialect would multiply the test matrix. Swapping the repository layer later stays possible.
+- **Tables** (`src/db/schema.ts`), one line each:
+
+  | Table | Holds | Why it exists |
+  | --- | --- | --- |
+  | `customers` | Name, channel and address (e.g. WhatsApp number) of whoever reports damage | An inbound message finds its customer; the customer view lists their own cases |
+  | `cases` | One claim: reference, revision, status, customer, assigned broker | The unit the broker works on; the revision ties approvals to the evidence they saw |
+  | `artifacts` | Every version of every evidence file (message, photo, estimate) | Corrections add a version and never overwrite the original |
+  | `observations` | Each value the agent read, with source, version and quote or photo description | Every finding links back to the exact place in the source |
+  | `findings` | Conflicts and gaps, and how the broker resolved them | Drives the next action and the broker's review |
+  | `messages` | Inbound messages and outbound drafts/sends | Dedupes replayed webhooks; nothing goes out without broker approval |
+  | `submissions` | The broker's approval of one revision plus the portal send state | One row per revision: a double click or retry never files twice |
+  | `portal_receipts` | Receipts of the **simulated** insurer portal | Stands in for the foreign system; returns the same receipt on repeat calls |
+  | `events` | Timeline: every step, tool, model, latency, error and cost | Audit trail, retry trace and the daily model budget |
+
 - **Object storage** (`src/storage/objects.ts`): local files now (`fixtures/files/` for synthetic evidence, `.data/objects/` otherwise). An S3-compatible driver (AWS S3, Cloudflare R2, MinIO, Supabase Storage) comes with deployment.
 
 ### Simulated services

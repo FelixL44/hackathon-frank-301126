@@ -2,10 +2,11 @@
 // All names, plates and policy numbers are synthetic. The message files and estimate PDFs are written from here
 // by `npm run fixtures:generate`; a test checks every quote below against those files.
 import type { ProposedObservation } from "../src/domain/schema.ts";
-import type { Extractor, NewArtifact } from "../src/workflow/cases.ts";
+import type { Extractor, NewArtifact, NewCustomer } from "../src/workflow/cases.ts";
 
 type FixtureCase = {
   title: string;
+  customer: NewCustomer;
   message: string;
   /** Repair lines on page 1 of the generated estimate PDF. */
   estimateLines: string[];
@@ -21,6 +22,10 @@ const artifactsFor = (dir: string): NewArtifact[] => [
   { sourceId: "photo-1", kind: "photo", mediaType: "image/jpeg", objectKey: `fixtures/${dir}/photo-1.jpg` },
   { sourceId: "estimate-1", kind: "estimate", mediaType: "application/pdf", objectKey: `fixtures/${dir}/estimate-1.pdf` },
 ];
+
+// Synthetic customers and numbers, for the demo only.
+const ANA: NewCustomer = { name: "Ana Ferreira", channel: "whatsapp", address: "+351900000001" };
+const RUI: NewCustomer = { name: "Rui Costa", channel: "whatsapp", address: "+351900000002" };
 
 const FRONT_MESSAGE =
   "Hello. On 18/11/2026, while parking at the supermarket, I hit a pillar and damaged the front bumper of my car, " +
@@ -62,6 +67,7 @@ const estimatePlate: ProposedObservation = {
 export const FIXTURE_CASES: Record<string, FixtureCase> = {
   "F1-consistent": {
     title: "Complete, consistent parking damage",
+    customer: ANA,
     message: FRONT_MESSAGE,
     estimateLines: ["Repair and paint front bumper"],
     artifacts: artifactsFor("F1"),
@@ -76,6 +82,7 @@ export const FIXTURE_CASES: Record<string, FixtureCase> = {
   },
   "F3-front-rear-conflict": {
     title: "Report says front, estimate says rear",
+    customer: ANA,
     message: FRONT_MESSAGE,
     estimateLines: ["Repair and paint rear bumper"],
     artifacts: artifactsFor("F3"),
@@ -90,6 +97,7 @@ export const FIXTURE_CASES: Record<string, FixtureCase> = {
   },
   "F4-both-ends": {
     title: "Report documents damage at both ends",
+    customer: RUI,
     message:
       "Hi. On 18/11/2026 I hit a pillar while parking and then, while reversing, hit a post. " +
       "Both the front bumper and the rear bumper were damaged. Plate AA-12-BC, " +
