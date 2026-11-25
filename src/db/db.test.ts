@@ -66,7 +66,7 @@ test("replayed inbound event is stored once", async () => {
     direction: "inbound" as const,
     channel: "demo" as const,
     role: "workshop" as const,
-    body: "Segue orçamento corrigido.",
+    body: "Here is the corrected estimate.",
     externalEventId: "evt-42",
     status: "received" as const,
   };

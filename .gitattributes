@@ -1,0 +1,2 @@
+# Archify output (one self-contained ~1 MB HTML file); keep it out of GitHub language stats and diffs
+public/architecture.html linguist-generated=true

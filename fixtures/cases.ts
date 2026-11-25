@@ -23,22 +23,22 @@ const artifactsFor = (dir: string): NewArtifact[] => [
 ];
 
 const FRONT_MESSAGE =
-  "Bom dia. No dia 18/11/2026, ao estacionar no parque do supermercado, toquei num pilar e risquei o " +
-  "para-choques dianteiro do meu carro, matrícula AA-12-BC. Apólice n.º POL-2026-000123. Obrigada, Ana";
+  "Hello. On 18/11/2026, while parking at the supermarket, I hit a pillar and damaged the front bumper of my car, " +
+  "plate AA-12-BC. Policy no. POL-2026-000123. Thanks, Ana";
 
 /** Policy, plate, date and event from FRONT_MESSAGE; shared by F1 and F3. */
 const frontMessageFacts: ProposedObservation[] = [
-  { field: "policyReference", value: "POL-2026-000123", normalized: "POL-2026-000123", locator: text("Apólice n.º POL-2026-000123"), readability: legible },
-  { field: "vehicleId", value: "AA-12-BC", normalized: "AA-12-BC", locator: text("matrícula AA-12-BC"), readability: legible },
-  { field: "incidentDate", value: "18/11/2026", normalized: "2026-11-18", locator: text("No dia 18/11/2026"), readability: legible },
+  { field: "policyReference", value: "POL-2026-000123", normalized: "POL-2026-000123", locator: text("Policy no. POL-2026-000123"), readability: legible },
+  { field: "vehicleId", value: "AA-12-BC", normalized: "AA-12-BC", locator: text("plate AA-12-BC"), readability: legible },
+  { field: "incidentDate", value: "18/11/2026", normalized: "2026-11-18", locator: text("On 18/11/2026"), readability: legible },
   {
     field: "eventDescription",
-    value: "ao estacionar no parque do supermercado, toquei num pilar e risquei o para-choques dianteiro",
+    value: "while parking at the supermarket, I hit a pillar and damaged the front bumper",
     normalized: null,
-    locator: text("ao estacionar no parque do supermercado, toquei num pilar"),
+    locator: text("while parking at the supermarket, I hit a pillar"),
     readability: legible,
   },
-  { field: "damagedArea", value: "para-choques dianteiro", normalized: "bumper:front", locator: text("risquei o para-choques dianteiro"), readability: legible },
+  { field: "damagedArea", value: "front bumper", normalized: "bumper:front", locator: text("damaged the front bumper"), readability: legible },
 ];
 
 const frontPhoto: ProposedObservation[] = [
@@ -55,7 +55,7 @@ const estimatePlate: ProposedObservation = {
   field: "vehicleId",
   value: "AA-12-BC",
   normalized: "AA-12-BC",
-  locator: text("Matrícula: AA-12-BC"),
+  locator: text("Plate: AA-12-BC"),
   readability: legible,
 };
 
@@ -63,53 +63,53 @@ export const FIXTURE_CASES: Record<string, FixtureCase> = {
   "F1-consistent": {
     title: "Complete, consistent parking damage",
     message: FRONT_MESSAGE,
-    estimateLines: ["Reparação e pintura do para-choques dianteiro"],
+    estimateLines: ["Repair and paint front bumper"],
     artifacts: artifactsFor("F1"),
     observations: {
       "message-1": frontMessageFacts,
       "photo-1": frontPhoto,
       "estimate-1": [
         estimatePlate,
-        { field: "damagedArea", value: "pintura do para-choques dianteiro", normalized: "bumper:front", locator: text("Reparação e pintura do para-choques dianteiro"), readability: legible },
+        { field: "damagedArea", value: "paint front bumper", normalized: "bumper:front", locator: text("Repair and paint front bumper"), readability: legible },
       ],
     },
   },
   "F3-front-rear-conflict": {
     title: "Report says front, estimate says rear",
     message: FRONT_MESSAGE,
-    estimateLines: ["Reparação e pintura do para-choques traseiro"],
+    estimateLines: ["Repair and paint rear bumper"],
     artifacts: artifactsFor("F3"),
     observations: {
       "message-1": frontMessageFacts,
       "photo-1": frontPhoto,
       "estimate-1": [
         estimatePlate,
-        { field: "damagedArea", value: "pintura do para-choques traseiro", normalized: "bumper:rear", locator: text("Reparação e pintura do para-choques traseiro"), readability: legible },
+        { field: "damagedArea", value: "paint rear bumper", normalized: "bumper:rear", locator: text("Repair and paint rear bumper"), readability: legible },
       ],
     },
   },
   "F4-both-ends": {
     title: "Report documents damage at both ends",
     message:
-      "Olá. No dia 18/11/2026 toquei num pilar ao estacionar e depois, ao fazer marcha-atrás, bati num poste. " +
-      "Ficaram danificados o para-choques dianteiro e o para-choques traseiro. Matrícula AA-12-BC, " +
-      "apólice n.º POL-2026-000123. Cumprimentos, Rui",
-    estimateLines: ["Pintura do para-choques dianteiro", "Reparação do para-choques traseiro"],
+      "Hi. On 18/11/2026 I hit a pillar while parking and then, while reversing, hit a post. " +
+      "Both the front bumper and the rear bumper were damaged. Plate AA-12-BC, " +
+      "policy no. POL-2026-000123. Regards, Rui",
+    estimateLines: ["Paint front bumper", "Repair rear bumper"],
     artifacts: artifactsFor("F4"),
     observations: {
       "message-1": [
-        { field: "policyReference", value: "POL-2026-000123", normalized: "POL-2026-000123", locator: text("apólice n.º POL-2026-000123"), readability: legible },
-        { field: "vehicleId", value: "AA-12-BC", normalized: "AA-12-BC", locator: text("Matrícula AA-12-BC"), readability: legible },
-        { field: "incidentDate", value: "18/11/2026", normalized: "2026-11-18", locator: text("No dia 18/11/2026"), readability: legible },
-        { field: "eventDescription", value: "toquei num pilar ao estacionar e depois, ao fazer marcha-atrás, bati num poste", normalized: null, locator: text("toquei num pilar ao estacionar e depois, ao fazer marcha-atrás, bati num poste"), readability: legible },
-        { field: "damagedArea", value: "para-choques dianteiro", normalized: "bumper:front", locator: text("o para-choques dianteiro"), readability: legible },
-        { field: "damagedArea", value: "para-choques traseiro", normalized: "bumper:rear", locator: text("o para-choques traseiro"), readability: legible },
+        { field: "policyReference", value: "POL-2026-000123", normalized: "POL-2026-000123", locator: text("policy no. POL-2026-000123"), readability: legible },
+        { field: "vehicleId", value: "AA-12-BC", normalized: "AA-12-BC", locator: text("Plate AA-12-BC"), readability: legible },
+        { field: "incidentDate", value: "18/11/2026", normalized: "2026-11-18", locator: text("On 18/11/2026"), readability: legible },
+        { field: "eventDescription", value: "I hit a pillar while parking and then, while reversing, hit a post", normalized: null, locator: text("I hit a pillar while parking and then, while reversing, hit a post"), readability: legible },
+        { field: "damagedArea", value: "front bumper", normalized: "bumper:front", locator: text("the front bumper"), readability: legible },
+        { field: "damagedArea", value: "rear bumper", normalized: "bumper:rear", locator: text("the rear bumper"), readability: legible },
       ],
       "photo-1": frontPhoto,
       "estimate-1": [
         estimatePlate,
-        { field: "damagedArea", value: "pintura do para-choques dianteiro", normalized: "bumper:front", locator: text("Pintura do para-choques dianteiro"), readability: legible },
-        { field: "damagedArea", value: "reparação do para-choques traseiro", normalized: "bumper:rear", locator: text("Reparação do para-choques traseiro"), readability: legible },
+        { field: "damagedArea", value: "paint front bumper", normalized: "bumper:front", locator: text("Paint front bumper"), readability: legible },
+        { field: "damagedArea", value: "repair rear bumper", normalized: "bumper:rear", locator: text("Repair rear bumper"), readability: legible },
       ],
     },
   },
