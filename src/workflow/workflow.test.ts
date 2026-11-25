@@ -7,7 +7,9 @@ import { cases, observations, portalReceipts, submissions } from "../db/schema.t
 import { decide } from "../domain/decide.ts";
 import { simulatedPortal } from "../portal/simulated.ts";
 import { ExtractionError } from "../extraction/model-extractor.ts";
-import { approve, caseView, loadCase, openCase, recompute, resolveConflict, WorkflowError } from "./cases.ts";
+import { approve, caseView, loadCase, openCase, recompute, resolveConflict, retryExtraction, WorkflowError } from "./cases.ts";
+
+import { draftCustomerRequest, finishCustomerRequest } from "./customer-requests.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -113,4 +115,53 @@ test("a missing required field routes to awaiting_information", async () => {
   assert.equal(state.case.status, "awaiting_information");
   assert.ok(state.gaps.some((g) => g.rule === "missing" && g.field === "policyReference"));
   await assert.rejects(approve(db, id, 1, simulatedPortal(db)), WorkflowError);
+});
+
+test("broker retry reads only failed sources and restores approval without duplicating observations", async () => {
+  const fixture = fixtureExtractor("F1-consistent");
+  const failing = {
+    ...fixture,
+    async extract(artifact: Parameters<typeof fixture.extract>[0]) {
+      if (artifact.kind === "estimate") throw new ExtractionError("invalid_output", "unreadable estimate", 3);
+      return fixture.extract(artifact);
+    },
+  };
+  const id = await openCase(db, FIXTURE_CASES["F1-consistent"]!, failing);
+  assert.deepEqual((await caseView(db, id)).failedSources, ["estimate-1"]);
+
+  await retryExtraction(db, id, 1, failing);
+  const stillFailing = await caseView(db, id);
+  assert.deepEqual(stillFailing.failedSources, ["estimate-1"]);
+  assert.equal(stillFailing.findings.filter((f) => f.rule === "invalid_extraction").length, 1);
+
+  await Promise.all([retryExtraction(db, id, 1, fixture), retryExtraction(db, id, 1, fixture)]);
+  const recovered = await caseView(db, id);
+  assert.equal(recovered.case.status, "awaiting_approval");
+  assert.deepEqual(recovered.failedSources, []);
+  assert.equal(recovered.findings.find((f) => f.rule === "invalid_extraction")?.status, "resolved");
+  assert.equal(recovered.events.filter((e) => e.operation === "extract" && e.result === "ok").length, 3);
+  assert.equal(recovered.observations.length, Object.values(FIXTURE_CASES["F1-consistent"]!.observations).flat().length);
+});
+
+test("a customer request waits for confirmation and a double confirmation delivers once", async () => {
+  const caseId = await openCase(db, FIXTURE_CASES["F3-front-rear-conflict"]!, fixtureExtractor("F3-front-rear-conflict"));
+  const input = { caseId, revision: 1, topic: "corrected_estimate" as const, instruction: "" };
+  await Promise.all([draftCustomerRequest(db, input), draftCustomerRequest(db, input)]);
+  const draftView = await caseView(db, caseId);
+  const drafts = draftView.messages.filter((m) => m.status === "draft");
+  assert.equal(drafts.length, 1);
+  assert.match(drafts[0]!.body, /orçamento/);
+  assert.equal(draftView.messages.filter((m) => m.status === "sent").length, 0);
+  const confirmation = { caseId, revision: 1, draftId: drafts[0]!.id, body: "Pode enviar o orçamento corrigido?" };
+  await Promise.all([finishCustomerRequest(db, confirmation), finishCustomerRequest(db, confirmation)]);
+  const confirmedView = await caseView(db, caseId);
+  assert.deepEqual(confirmedView.messages.filter((m) => m.status === "sent").map((m) => m.body), [confirmation.body]);
+  assert.deepEqual(confirmedView.events.filter((e) => e.operation.endsWith("customer_request")).map((e) => e.operation),
+    ["draft_customer_request", "confirm_customer_request", "send_customer_request"]);
+
+  await draftCustomerRequest(db, input);
+  const staleDraft = (await caseView(db, caseId)).messages.find((m) => m.status === "draft")!;
+  await db.update(cases).set({ revision: 2 }).where(eq(cases.id, caseId));
+  await assert.rejects(finishCustomerRequest(db, { ...confirmation, draftId: staleDraft.id }),
+    (error: unknown) => error instanceof WorkflowError && error.code === "stale_request");
 });
