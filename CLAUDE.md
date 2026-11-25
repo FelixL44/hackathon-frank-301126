@@ -38,5 +38,5 @@ An app for an insurance **broker** (not an insurer). Customers report damage via
 | Frederik | WhatsApp/Telegram integration, style guide, frontend support |
 | Emre | Frontend: customer, broker and admin views |
 
-- One branch per feature (use the Linear branch name), PR into `main`.
+- One branch per feature (use the Linear branch name), cut from `staging`, PR into `staging`. `main` only gets tested releases from `staging` (merge commit, no squash).
 - **Record your work in Linear** (team Hackathon-frank, issues HAC-*): update the issue status and comment what changed.

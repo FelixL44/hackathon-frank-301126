@@ -39,7 +39,7 @@ Agreed in the team call on 24 Nov 2026. Issues HAC-24 to HAC-33 in Linear track 
 
 **How we work**
 
-- One branch per feature, pull request into `main`. A `staging` branch for testing features together is proposed.
+- One branch per feature, cut from `staging`, pull request into `staging`. When `staging` works end to end, a release PR `staging → main` (merge commit, no squash) updates `main`, which stays demo-ready.
 - Every Claude session records its work in Linear.
 - Open questions: a cheaper model for development (Claude for the demo is agreed), the exact demo categories, and whether a WhatsApp Business account is possible this week.
 
