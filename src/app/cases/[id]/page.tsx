@@ -26,7 +26,7 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
     if (e instanceof WorkflowError && e.code === "not_found") notFound();
     throw e;
   });
-  const { case: c, filing, submission, approval } = view;
+  const { case: c, filing, submission } = view;
   const customerMessage = view.messages.find((m) => m.direction === "inbound" && m.role === "customer");
   const lastDecision = view.events.findLast((e) => e.operation === "decide")?.detail as { rule?: string } | undefined;
 
@@ -202,7 +202,7 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
               {submission.portalReference ? (
                 <p className="notice ok">
                   Filed as <Link href={`/portal/${submission.portalReference}`}>{submission.portalReference}</Link> · revision{" "}
-                  {submission.approvedRevision} approved by {approval?.approvedBy} at {approval && fmt(approval.createdAt)}
+                  {submission.approvedRevision} approved by {submission.approvedBy} at {fmt(submission.createdAt)}
                 </p>
               ) : (
                 <p className="notice">
@@ -210,12 +210,10 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
                   {submission.lastErrorCategory && <> · last error: {submission.lastErrorCategory}</>}
                 </p>
               )}
-              {approval && (
-                <details>
-                  <summary>Submitted payload (frozen at approval)</summary>
-                  <pre>{JSON.stringify(approval.payload, null, 2)}</pre>
-                </details>
-              )}
+              <details>
+                <summary>Submitted payload (frozen at approval)</summary>
+                <pre>{JSON.stringify(submission.payload, null, 2)}</pre>
+              </details>
             </div>
           )}
         </section>
