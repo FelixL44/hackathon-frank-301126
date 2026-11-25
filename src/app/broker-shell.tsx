@@ -1,4 +1,4 @@
-import { Archive, ArrowUpRight, ChevronRight, ClipboardCheck, Clock3, Inbox, Search, ShieldCheck } from "lucide-react";
+import { Archive, ArrowUpRight, ClipboardCheck, Clock3, Inbox, Search } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { getDb } from "../server/db.ts";
@@ -14,21 +14,24 @@ export const queues = [
 export type Queue = (typeof queues)[number]["id"];
 
 export async function BrokerShell({
-  children, queue, counts, reference,
+  children, queue, counts, returnTo,
 }: {
   children: ReactNode;
   queue?: Queue;
   counts?: Record<Queue, number>;
-  reference?: string;
+  returnTo?: string;
 }) {
+  const detail = returnTo !== undefined;
+  const originQueue = detail ? new URLSearchParams(returnTo.slice(2)).get("queue") : null;
+  const active = queue ?? queues.find(({ id }) => id === originQueue)?.id ?? "all";
   const mode = await extractionStatus(await getDb());
 
   return (
     <div className="broker-shell">
       <aside className="broker-sidebar">
         <Link className="workspace-brand" href="/">
-          <span className="workspace-mark"><ShieldCheck size={21} /></span>
-          <span><strong>Frank</strong><small>Broker workspace</small></span>
+          <img src="/frank-logo.webp" alt="FRANK" width={120} height={40} />
+          <small>Broker workspace</small>
         </Link>
         <form action="/" role="search" className="broker-search sidebar-search">
           <Search size={17} aria-hidden="true" />
@@ -36,7 +39,7 @@ export async function BrokerShell({
         </form>
         <nav aria-label="Case queues" className="broker-nav">
           {queues.map(({ id, label, icon: Icon }) => (
-            <Link key={id} href={id === "all" ? "/" : `/?queue=${id}`} aria-current={id === queue ? "page" : reference && id === "all" ? "location" : undefined}>
+            <Link key={id} href={id === "all" ? "/" : `/?queue=${id}`} aria-current={id === active ? (detail ? "location" : "page") : undefined}>
               <Icon size={18} aria-hidden="true" /> <span>{label}</span>
               {counts && <span className="nav-count">{counts[id]}</span>}
             </Link>
@@ -50,15 +53,7 @@ export async function BrokerShell({
           </div>
         </div>
       </aside>
-      <main className="broker-main">
-        <nav className="broker-crumbs" aria-label="Breadcrumb">
-          <Link href="/">Workspace</Link><ChevronRight size={14} aria-hidden="true" />
-          {reference ? (
-            <><Link href="/">Cases</Link><ChevronRight size={14} aria-hidden="true" /><span aria-current="page">{reference}</span></>
-          ) : <span aria-current="page">Cases</span>}
-        </nav>
-        {children}
-      </main>
+      <main className="broker-main">{children}</main>
     </div>
   );
 }

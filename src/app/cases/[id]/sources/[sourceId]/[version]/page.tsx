@@ -1,4 +1,5 @@
 // Source viewer: the exact page or photo behind an observation, with the cited words highlighted.
+import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
@@ -6,6 +7,8 @@ import { pdfPages } from "../../../../../../extraction/model-extractor.ts";
 import { getDb } from "../../../../../../server/db.ts";
 import { readObject } from "../../../../../../storage/objects.ts";
 import { caseView, WorkflowError } from "../../../../../../workflow/cases.ts";
+import { BrokerShell } from "../../../../../broker-shell.tsx";
+import { caseHref, caseListHref } from "../../../../../case-navigation.ts";
 import { Highlight } from "../../../../../highlight.tsx";
 import { sourceHref } from "../../../../../status.ts";
 
@@ -15,12 +18,14 @@ const Params = z.object({ id: z.uuid(), sourceId: z.string().regex(/^[a-z0-9-]{1
 
 export default async function SourcePage(props: {
   params: Promise<Record<string, string>>;
-  searchParams: Promise<{ page?: string; quote?: string }>;
+  searchParams: Promise<{ page?: string; quote?: string; from?: string; tab?: string }>;
 }) {
   const params = Params.safeParse(await props.params);
   if (!params.success) notFound();
   const { id, sourceId, version } = params.data;
   const search = await props.searchParams;
+  const from = caseListHref(search.from);
+  const tab = search.tab === "activity" ? "activity" : undefined;
   const view = await caseView(await getDb(), id).catch((e) => {
     if (e instanceof WorkflowError && e.code === "not_found") notFound();
     throw e;
@@ -43,8 +48,9 @@ export default async function SourcePage(props: {
   const page = Math.min(Math.max(Number(search.page) || 1, 1), pages?.length ?? 1);
 
   return (
-    <main>
-      <div className="row">
+    <BrokerShell returnTo={from}>
+      <Link className="case-back" href={caseHref(id, { from, tab })}><ArrowLeft size={16} aria-hidden="true" /> Back to {view.case.reference}</Link>
+      <header className="row broker-heading">
         <div>
           <h1>
             {sourceId} v{version}
@@ -54,18 +60,17 @@ export default async function SourcePage(props: {
             {artifact.supersedesVersion && <> · replaces v{artifact.supersedesVersion}</>}
           </p>
         </div>
-        <Link href={`/cases/${id}`}>← Case {view.case.reference}</Link>
-      </div>
+      </header>
 
       {latest > version && (
         <p className="notice">
-          This version was replaced. <Link href={`/cases/${id}/sources/${sourceId}/${latest}`}>Open v{latest}</Link>
+          This version was replaced. <Link href={sourceHref(id, { sourceId, version: latest }, from, tab)}>Open v{latest}</Link>
         </p>
       )}
       {!available && <p className="notice">This file is not available yet. The observations below still show what was read.</p>}
 
-      <div className="viewer">
-        <div className="card">
+      <div className={available ? "viewer" : undefined}>
+        {available && <div className="card review-panel">
           {available && artifact.mediaType === "application/pdf" && (
             <iframe src={`${fileUrl}#page=${page}`} title={`${sourceId} page ${page}`} />
           )}
@@ -77,9 +82,9 @@ export default async function SourcePage(props: {
               <Highlight text={pages![0]!} quote={search.quote} />
             </blockquote>
           )}
-        </div>
+        </div>}
 
-        <div className="card">
+        <div className="card review-panel">
           {pages && artifact.mediaType === "application/pdf" && (
             <>
               <h2>
@@ -92,7 +97,7 @@ export default async function SourcePage(props: {
                 Pages:{" "}
                 {pages.map((_, i) => (
                   <span key={i}>
-                    <Link href={`?page=${i + 1}`}>{i + 1}</Link>{" "}
+                    <Link href={`?${new URLSearchParams({ page: String(i + 1), ...(from !== "/" && { from }), ...(tab && { tab }) })}`}>{i + 1}</Link>{" "}
                   </span>
                 ))}
               </p>
@@ -109,7 +114,7 @@ export default async function SourcePage(props: {
                   {o.normalized && o.normalized !== o.value && <span className="muted"> → {o.normalized}</span>}
                   <br />
                   {o.locator.type === "text" ? (
-                    <Link href={sourceHref(id, o)} className="muted">
+                    <Link href={sourceHref(id, o, from, tab)} className="muted">
                       p. {o.locator.page}: “{o.locator.quote}”
                     </Link>
                   ) : (
@@ -121,6 +126,6 @@ export default async function SourcePage(props: {
           )}
         </div>
       </div>
-    </main>
+    </BrokerShell>
   );
 }

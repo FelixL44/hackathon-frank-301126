@@ -7,8 +7,9 @@ import { SENT_REQUEST_PREFIX } from "../domain/customer-request.ts";
 import { CaseStatus } from "../domain/schema.ts";
 import { getDb } from "../server/db.ts";
 import { launchFixture } from "./actions.ts";
+import { caseHref } from "./case-navigation.ts";
 import { BrokerShell, queues, type Queue } from "./broker-shell.tsx";
-import { caseActor, STATUS } from "./status.ts";
+import { caseActor, nextCaseAction, STATUS } from "./status.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -69,14 +70,19 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
       ...(active !== "all" && { queue: active }), ...(query && { q: query }),
       ...(selected && { status: selected }), ...(oldest && { sort: "oldest" }), ...params,
     });
-    return `/?${values}`;
+    return values.size ? `/?${values}` : "/";
   }
+
+  const from = href(pageNumber > 1 ? { page: String(pageNumber) } : {});
+  const next = rows.find((c) => c.status === "broker_review") ??
+    rows.find((c) => c.status === "awaiting_information" && !c.contacted) ??
+    rows.find((c) => c.status === "awaiting_approval");
 
   return (
     <BrokerShell queue={active} counts={counts}>
       <header className="row broker-heading">
         <div>
-          <h1>Claims dashboard</h1>
+          <h1>{active === "all" ? "Claims workspace" : queues.find((item) => item.id === active)?.label}</h1>
         </div>
         <details className="demo-menu">
           <summary className="broker-button primary-action"><Plus size={18} aria-hidden="true" /> New demo case <ChevronDown size={15} aria-hidden="true" /></summary>
@@ -88,20 +94,33 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
         </details>
       </header>
 
-      <section className="queue-summary" aria-label="Case overview">
-        {queues.map(({ id, label, icon: Icon }) => (
-          <Link className="card queue-card" key={id} href={id === "all" ? "/" : `/?queue=${id}`}>
-            <span className="queue-card-top"><span className="icon-tile"><Icon size={18} aria-hidden="true" /></span><ArrowUpRight size={16} aria-hidden="true" /></span>
-            <strong>{counts[id]}</strong>
-            <span>{id === "all" ? "Assigned cases" : label}</span>
-          </Link>
-        ))}
-      </section>
+      {active === "all" && (
+        <section className="queue-summary" aria-label="Case overview">
+          <div className="card queue-feature">
+            <div>
+              <span className="queue-feature-label">Needs my action</span>
+              <p><strong>{counts.review}</strong> {counts.review === 1 ? "claim to review" : "claims to review"}</p>
+            </div>
+            {next ? (
+              <Link className="broker-button" href={caseHref(next.id, { from })}>
+                Open next case <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+            ) : <span className="queue-feature-clear">You’re all caught up</span>}
+          </div>
+          {queues.filter(({ id }) => id === "waiting" || id === "submitted").map(({ id, label, icon: Icon }) => (
+            <Link className="card queue-card" key={id} href={`/?queue=${id}`}>
+              <span className="queue-card-top"><span className="icon-tile"><Icon size={18} aria-hidden="true" /></span><ArrowUpRight size={16} aria-hidden="true" /></span>
+              <strong>{counts[id]}</strong>
+              <span>{label}</span>
+            </Link>
+          ))}
+        </section>
+      )}
 
       <section className="card table-panel" aria-labelledby="queue-heading">
         <header className="table-toolbar">
           <div>
-            <h2 id="queue-heading">{active === "all" ? "Assigned cases" : queues.find((item) => item.id === active)?.label}</h2>
+            <h2 id="queue-heading">Assigned cases</h2>
             <p className="muted">{matching.length} {matching.length === 1 ? "case" : "cases"}</p>
           </div>
           <form action="/" className="case-filters">
@@ -119,6 +138,9 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
               <input name="q" type="search" maxLength={160} aria-label="Search assigned cases" placeholder="Search cases" defaultValue={query} />
             </label>
             <button type="submit" className="secondary broker-button">Apply</button>
+            <Link className="broker-button compact-sort" href={href({ sort: oldest ? "" : "oldest" })} aria-label={oldest ? "Sort newest first" : "Sort oldest first"}>
+              {oldest ? <ArrowUp size={15} aria-hidden="true" /> : <ArrowDown size={15} aria-hidden="true" />} Updated
+            </Link>
             {(selected || query) && <Link href={active === "all" ? "/" : `/?queue=${active}`} className="filter-reset">Clear</Link>}
           </form>
         </header>
@@ -127,10 +149,10 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
             <thead>
               <tr>
                 <th scope="col">Case / customer report</th>
-                <th scope="col">Status</th>
-                <th scope="col">Next to act</th>
-                <th scope="col">Policy / vehicle</th>
-                <th scope="col" aria-sort={oldest ? "ascending" : "descending"}>
+                <th scope="col" className="case-status-column">Status</th>
+                <th scope="col">Next action</th>
+                <th scope="col" className="case-policy-column">Policy / vehicle</th>
+                <th scope="col" className="case-updated-column" aria-sort={oldest ? "ascending" : "descending"}>
                   <Link href={href({ sort: oldest ? "" : "oldest" })}>
                     Updated {oldest ? <ArrowUp size={13} aria-hidden="true" /> : <ArrowDown size={13} aria-hidden="true" />}
                   </Link>
@@ -145,15 +167,16 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
                   <tr key={c.id}>
                     <td><div className="case-identity">
                       <span className="icon-tile"><FileText size={17} aria-hidden="true" /></span>
-                      <span><Link className="case-reference" href={`/cases/${c.id}`}>{c.reference}</Link>
+                      <span><Link className="case-reference" href={caseHref(c.id, { from })}>{c.reference}</Link>
                         {c.message && <small title={c.message}>{c.message}</small>}
+                        <span className={`badge compact-case-status ${c.status}`}>{STATUS[c.status].label}</span>
                       </span>
                     </div></td>
-                    <td><span className={`badge ${c.status}`}>{STATUS[c.status].label}</span></td>
-                    <td><span className={`case-actor ${actor === "Broker" ? "actor-broker" : ""}`}>{actor}</span></td>
-                    <td>{c.policy ?? "Unknown"}{c.vehicle && <small>{c.vehicle}</small>}</td>
-                    <td><time dateTime={c.updatedAt.toISOString()}>{date.format(c.updatedAt)}</time></td>
-                    <td><Link className="case-open" href={`/cases/${c.id}`} aria-label={`Open ${c.reference}`}><ArrowUpRight size={17} /></Link></td>
+                    <td className="case-status-column"><span className={`badge ${c.status}`}>{STATUS[c.status].label}</span></td>
+                    <td><span className={`case-actor ${actor === "Broker" ? "actor-broker" : ""}`}>{nextCaseAction(c.status, c.contacted)}</span>{actor !== "Complete" && <small className="actor-label">{actor}</small>}</td>
+                    <td className="case-policy-column">{c.policy ?? "Unknown"}{c.vehicle && <small>{c.vehicle}</small>}</td>
+                    <td className="case-updated-column"><time dateTime={c.updatedAt.toISOString()}>{date.format(c.updatedAt)}</time></td>
+                    <td><Link className="case-open" href={caseHref(c.id, { from })} aria-label={`Open ${c.reference}`}><ArrowUpRight size={17} /></Link></td>
                   </tr>
                 );
               })}
