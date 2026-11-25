@@ -12,7 +12,7 @@ import { getDb } from "../../../server/db.ts";
 import { caseView, STALE_INTAKE_MS, WorkflowError } from "../../../workflow/cases.ts";
 import { ActionButton } from "../../action-button.tsx";
 import { approveCase, confirmRequestDraft, createRequestDraft, resolveFinding, resumeExtraction } from "../../actions.ts";
-import { BrokerShell } from "../../broker-shell.tsx";
+import { ActivePill, BrokerShell } from "../../broker-shell.tsx";
 import { caseHref, caseListHref, type CaseTab } from "../../case-navigation.ts";
 import { caseActor, fmt, nextCaseAction, sourceHref, STATUS } from "../../status.ts";
 
@@ -235,6 +235,7 @@ export default async function CasePage({ params, searchParams }: {
       <nav className="case-tabs" aria-label="Case sections">
         {TABS.map(({ id: section, label, icon: Icon }) => (
           <Link key={section} aria-current={section === tab ? "page" : undefined} href={href(section)}>
+            {section === tab && <ActivePill name="case-tab-pill" className="tab-pill" />}
             <Icon size={17} aria-hidden="true" /> {label}
             {section === "messages" && (conversation.length > 0 || draft) && <span className="badge">{conversation.length + Number(Boolean(draft))}</span>}
           </Link>
