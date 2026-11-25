@@ -1,22 +1,37 @@
+import { ArrowRight, ArrowUpRight, ClipboardCheck, FileText, MessageSquareText, Paperclip, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
-import { recipientFor } from "../../../domain/questions.ts";
+import { draftKey, REQUEST_TOPICS, sentKey } from "../../../domain/customer-request.ts";
+import { currentArtifacts, usableCurrent } from "../../../domain/filing.ts";
 import type { Locator } from "../../../domain/schema.ts";
 import { getDb } from "../../../server/db.ts";
 import { caseView, STALE_INTAKE_MS, WorkflowError } from "../../../workflow/cases.ts";
-import { approveCase, resolveFinding, resumeExtraction } from "../../actions.ts";
-import { fmt, sourceHref, STATUS } from "../../status.ts";
-
-export const dynamic = "force-dynamic";
+import { ActionButton } from "../../action-button.tsx";
+import { approveCase, confirmRequestDraft, createRequestDraft, resolveFinding, resumeExtraction } from "../../actions.ts";
+import { BrokerShell } from "../../broker-shell.tsx";
+import { caseActor, fmt, sourceHref, STATUS } from "../../status.ts";
 
 const ERRORS: Record<string, string> = {
-  stale_approval: "This revision is no longer current. Review the new evidence before approving.",
+  stale_approval: "This revision is no longer current. Review the new evidence before proceeding.",
   not_ready: "The case is not ready for approval.",
-  invalid_resolution: "A resolution needs a reason, and the accepted source must be one of the cited sources.",
+  invalid_resolution: "Enter a reason and choose one of the cited sources or both.",
+  stale_request: "The evidence changed. Review the current revision before drafting a new request.",
+  request_unavailable: "This case is no longer waiting for a customer request.",
+  invalid_request: "Enter a short instruction for a custom request or a message to send.",
 };
 
-const where = (l: Locator) => (l.type === "text" ? `p. ${l.page}: “${l.quote}”` : `${l.imageId}: ${l.description}`);
+const SOURCE_LABELS = { message: "Customer report", photo: "Photo", estimate: "Workshop estimate" };
+const FINDING_LABELS = {
+  conflict: "Conflicting evidence", missing: "Missing information", illegible: "Unreadable evidence",
+  ambiguous: "Unclear information", invalid_extraction: "Extraction failed",
+};
+const FIELD_LABELS: Record<string, string> = {
+  caseReference: "Case reference", policyReference: "Policy", vehicleId: "Vehicle",
+  incidentDate: "Incident date", eventDescription: "Incident description", damagedArea: "Damaged area",
+};
+
+const where = (l: Locator) => (l.type === "text" ? `Page ${l.page} · “${l.quote}”` : l.description);
 
 export default async function CasePage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ error?: string }> }) {
   const { id } = await props.params;
@@ -27,233 +42,266 @@ export default async function CasePage(props: { params: Promise<{ id: string }>;
     throw e;
   });
   const { case: c, filing, submission, approval } = view;
-  const customerMessage = view.messages.find((m) => m.direction === "inbound" && m.role === "customer");
-  const lastDecision = view.events.findLast((e) => e.operation === "decide")?.detail as { rule?: string } | undefined;
+  const customerMessages = view.messages.filter((m) => m.direction === "inbound" && m.role === "customer");
+  const sentMessages = view.messages.filter((m) => m.direction === "outbound" && m.role === "customer" && m.status === "sent");
+  const contacted = sentMessages.some((m) => m.requestKey?.startsWith(sentKey(c.revision)));
+  const draft = view.messages.find((m) => m.status === "draft" && m.requestKey?.startsWith(draftKey(c.revision)));
+  const canRequest = c.status === "broker_review" || c.status === "awaiting_information";
+  const lastDecision = view.events.findLast((e) => e.operation === "decide")?.detail?.rule;
+  const current = currentArtifacts(view.artifacts);
+  const estimateNeedsReview = view.findings.some((finding) => finding.status === "open" &&
+    finding.rule === "conflict" && finding.evidence.some((e) => current.some((a) => a.sourceId === e.sourceId && a.kind === "estimate")));
+  const suggestedTopic = estimateNeedsReview || view.gaps.some((gap) => gap.document === "estimate")
+    ? "corrected_estimate"
+    : view.gaps.some((gap) => gap.document === "photo" || gap.field === "damagedArea")
+      ? "clearer_photo"
+      : "policy_details";
+  const facts = usableCurrent(view.artifacts, view.observations);
+  const summary = [
+    { label: "Policy", value: c.policyReference ?? facts.find((o) => o.field === "policyReference")?.value },
+    { label: "Vehicle", value: c.vehicleId ?? facts.find((o) => o.field === "vehicleId")?.value },
+    { label: "Incident date", value: facts.find((o) => o.field === "incidentDate")?.value },
+  ];
 
   return (
-    <main>
-      <div className="row">
+    <BrokerShell reference={c.reference}>
+      <header className="row broker-heading">
         <div>
           <h1>{c.reference}</h1>
-          <p className="muted">
-            Revision {c.revision} · <span className={`badge ${c.status}`}>{STATUS[c.status].label}</span> · Next to act:{" "}
-            {STATUS[c.status].actor}
-          </p>
+          <div className="case-meta">
+            <span className={`badge ${c.status}`}>{STATUS[c.status].label}</span>
+            <span className="muted">Revision {c.revision}</span>
+            <span className="muted">Next to act · <strong>{caseActor(c.status, contacted)}</strong></span>
+          </div>
         </div>
-        <Link href="/">← Inbox</Link>
-      </div>
+        <div className="case-meta">
+          {canRequest && <a className="broker-button" href="#customer-request"><MessageSquareText size={16} /> Request information</a>}
+          {c.status === "awaiting_approval" && filing && (
+            <form action={approveCase}>
+              <input type="hidden" name="caseId" value={c.id} />
+              <input type="hidden" name="revision" value={c.revision} />
+              <ActionButton className="broker-button primary-action" pendingLabel="Forwarding…">
+                Approve and forward <ArrowRight size={16} />
+              </ActionButton>
+            </form>
+          )}
+        </div>
+      </header>
 
-      {error && <p className="notice error">{ERRORS[error] ?? error}</p>}
-
-      {c.status === "intake" &&
-        (Date.now() - (view.events.at(-1)?.createdAt ?? c.updatedAt).getTime() > STALE_INTAKE_MS ? (
+      {typeof error === "string" && ERRORS[error] && <p className="notice error" role="alert">{ERRORS[error]}</p>}
+      {c.status === "intake" && (
+        Date.now() - (view.events.at(-1)?.createdAt ?? c.updatedAt).getTime() > STALE_INTAKE_MS ? (
           <form action={resumeExtraction} className="notice">
             <input type="hidden" name="caseId" value={c.id} />
-            Extraction stopped before it finished (for example after a restart). Files already read are kept.{" "}
-            <button>Resume extraction</button>
+            Extraction was interrupted. Completed files are kept. <ActionButton pendingLabel="Resuming…">Resume extraction</ActionButton>
           </form>
-        ) : (
-          <p className="notice">Extraction is running. Reload in a moment.</p>
-        ))}
-
-      {(c.status === "broker_review" || c.status === "awaiting_information") && (
-        <div className="card">
-          <h2>Next step · {STATUS[c.status].actor}</h2>
-          <p className="muted">Why: {lastDecision?.rule ?? "see findings"}</p>
-          {c.status === "awaiting_information" ? (
-            <ul>
-              {view.gaps.map((g, i) => (
-                <li key={i}>
-                  Ask the <strong>{recipientFor(g)}</strong>: {g.explanation}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>Resolve each open conflict below with a reason, or ask for a corrected document.</p>
-          )}
-          <p className="muted">Sending the question through the demo inbox comes with HAC-11.</p>
+        ) : <p className="notice">Extraction is in progress. Refresh to check its status.</p>
+      )}
+      {submission && (
+        <div className="notice ok">
+          {submission.portalReference ? (
+            <>Filed in the simulated portal · <Link href={`/portal/${submission.portalReference}`}>Open receipt {submission.portalReference}</Link></>
+          ) : <>Submission pending · {submission.attempts} attempts{submission.lastErrorCategory && ` · ${submission.lastErrorCategory}`}</>}
         </div>
       )}
 
-      <div className="grid">
-        <section>
+      <div className="grid case-detail-grid">
+        <section aria-label="Customer evidence">
           <div className="card">
-            <h2>Customer account</h2>
-            <blockquote className="quote" lang="pt">
-              {customerMessage?.body ?? "No message."}
-            </blockquote>
+            <h2 className="case-card-title"><MessageSquareText size={19} /> Customer report</h2>
+            <dl className="case-facts">
+              {summary.map(({ label, value }) => <div key={label}><dt className="muted">{label}</dt><dd>{value ?? "Unknown"}</dd></div>)}
+            </dl>
+            {customerMessages.length ? (
+              <ul className="case-messages">
+                {customerMessages.map((m) => (
+                  <li key={m.id}>
+                    <time dateTime={m.createdAt.toISOString()} className="muted">{fmt(m.createdAt)}</time>
+                    <p>{m.body}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="muted">No customer report received.</p>}
           </div>
+
           <div className="card">
-            <h2>Evidence</h2>
-            <ul>
-              {view.artifacts.map((a) => (
-                <li key={`${a.sourceId}-${a.version}`} id={`src-${a.sourceId}-v${a.version}`}>
-                  <Link href={sourceHref(c.id, a)}>
-                    <strong>{a.sourceId}</strong> v{a.version}
-                  </Link>{" "}
-                  · {a.kind}
-                  {a.supersedesVersion && <> · replaces v{a.supersedesVersion}</>}
-                </li>
+            <h2 className="case-card-title"><Paperclip size={19} /> Sources <span className="badge">{view.artifacts.length}</span></h2>
+            {view.artifacts.length ? (
+              <ul className="evidence-list">
+                {view.artifacts.map((a) => (
+                  <li key={`${a.sourceId}-${a.version}`}>
+                    <Link href={sourceHref(c.id, a)}>
+                      <FileText size={16} aria-hidden="true" />
+                      <span><strong>{SOURCE_LABELS[a.kind]}</strong><small className="muted"> · {a.sourceId} · v{a.version}</small></span>
+                      {!current.includes(a) && <span className="badge">Superseded</span>}
+                      <ArrowUpRight size={16} aria-hidden="true" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="muted">No sources received.</p>}
+          </div>
+
+          {(canRequest || sentMessages.length > 0) && (
+            <div className="card case-draft" id="customer-request">
+              <h2 className="case-card-title"><MessageSquareText size={19} /> Customer requests</h2>
+              {canRequest && (draft ? (
+                <form action={confirmRequestDraft} key={draft.id}>
+                  <input type="hidden" name="caseId" value={c.id} />
+                  <input type="hidden" name="revision" value={c.revision} />
+                  <input type="hidden" name="draftId" value={draft.id} />
+                  <label htmlFor="request-body">Review and edit draft</label>
+                  <textarea id="request-body" name="body" rows={8} defaultValue={draft.body} maxLength={2000} required />
+                  <div className="case-actions">
+                    <ActionButton name="intent" value="send" pendingLabel="Saving…">Confirm and send to demo inbox</ActionButton>
+                    <ActionButton className="secondary" name="intent" value="discard" formNoValidate>Discard draft</ActionButton>
+                  </div>
+                </form>
+              ) : (
+                <form action={createRequestDraft}>
+                  <input type="hidden" name="caseId" value={c.id} />
+                  <input type="hidden" name="revision" value={c.revision} />
+                  <label htmlFor="request-topic">Request type</label>
+                  <select id="request-topic" name="topic" defaultValue={suggestedTopic}>
+                    {Object.entries(REQUEST_TOPICS).map(([topic, { label }]) => <option value={topic} key={topic}>{label}</option>)}
+                  </select>
+                  <label htmlFor="request-instruction">Short instruction <span className="muted">(optional for presets)</span></label>
+                  <textarea id="request-instruction" name="instruction" rows={2} maxLength={500} placeholder="Write the request in the customer’s language" />
+                  <ActionButton pendingLabel="Preparing…">Prepare draft</ActionButton>
+                </form>
               ))}
-            </ul>
-          </div>
+              {sentMessages.length > 0 && (
+                <ul className="case-messages request-history">
+                  {sentMessages.map((m) => (
+                    <li key={m.id}>
+                      <div className="case-meta"><span className="badge submitted">Sent to demo inbox</span><time dateTime={m.createdAt.toISOString()} className="muted">{fmt(m.createdAt)}</time></div>
+                      <p>{m.body}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </section>
 
-        <section>
+        <section aria-label="Assessment and findings">
           <div className="card">
-            <h2>Findings</h2>
-            {view.findings.length === 0 ? (
-              <p className="muted">No findings. All required checks pass.</p>
-            ) : (
-              <ul>
+            <h2 className="case-card-title"><ClipboardCheck size={19} /> Agent assessment</h2>
+            {typeof lastDecision === "string" && <p className="muted">{lastDecision}</p>}
+            {view.failedSources.length > 0 && (
+              <form action={resumeExtraction} className="notice error">
+                <input type="hidden" name="caseId" value={c.id} />
+                <input type="hidden" name="revision" value={c.revision} />
+                <div>Extraction failed for {view.failedSources.join(", ")}.</div>
+                <div className="case-actions"><ActionButton className="broker-button" pendingLabel="Retrying…"><RotateCcw size={15} /> Retry extraction</ActionButton></div>
+              </form>
+            )}
+            {view.findings.length ? (
+              <ul className="case-findings">
                 {view.findings.map((f) => (
                   <li key={f.id}>
-                    <span className="badge">{f.rule}</span> {f.explanation} <span className="muted">({f.status})</span>
+                    <div className="case-meta">
+                      <strong>{FINDING_LABELS[f.rule]}</strong>
+                      <span className={`badge ${f.status === "resolved" ? "submitted" : "broker_review"}`}>{f.status === "resolved" ? "Resolved" : "Open"}</span>
+                    </div>
+                    <p>{f.explanation}</p>
                     {f.evidence.length > 0 && (
-                      <ul>
-                        {f.evidence.map((e, i) => (
-                          <li key={i}>
-                            <Link href={sourceHref(c.id, e)}>
-                              {e.sourceId} v{e.version}
-                            </Link>{" "}
+                      <ul className="finding-sources">
+                        {f.evidence.map((e, index) => (
+                          <li key={index}>
+                            <Link href={sourceHref(c.id, e)}>{e.sourceId} · v{e.version}</Link>
                             <span className="muted">{where(e.locator)}</span>
                           </li>
                         ))}
                       </ul>
                     )}
                     {f.rule === "conflict" && f.status === "open" && (
-                      <form action={resolveFinding}>
-                        <input type="hidden" name="caseId" value={c.id} />
-                        <input type="hidden" name="findingId" value={f.id} />
-                        <fieldset>
-                          <legend>Which source is right?</legend>
-                          {[...new Set(f.evidence.map((e) => e.sourceId))].map((sourceId) => (
-                            <label key={sourceId} style={{ display: "block" }}>
-                              <input type="radio" name="acceptedSourceId" value={sourceId} required /> {sourceId}
-                            </label>
-                          ))}
-                          <label style={{ display: "block" }}>
-                            <input type="radio" name="acceptedSourceId" value="" /> Both (separate damages)
-                          </label>
-                        </fieldset>
-                        <textarea name="reason" rows={2} required maxLength={1000} placeholder="Reason, e.g. workshop confirmed by phone" />
-                        <button>Record resolution</button>
-                      </form>
+                      <details>
+                        <summary>Resolve conflict</summary>
+                        <form action={resolveFinding}>
+                          <input type="hidden" name="caseId" value={c.id} />
+                          <input type="hidden" name="findingId" value={f.id} />
+                          <fieldset className="resolution-choices">
+                            <legend>Which evidence should the filing use?</legend>
+                            {[...new Set(f.evidence.map((e) => e.sourceId))].map((sourceId) => (
+                              <label key={sourceId}><input type="radio" name="acceptedSourceId" value={sourceId} required /> {sourceId}</label>
+                            ))}
+                            <label><input type="radio" name="acceptedSourceId" value="" /> Both sources describe separate damage</label>
+                          </fieldset>
+                          <label className="case-form-label" htmlFor={`reason-${f.id}`}>Resolution reason</label>
+                          <textarea id={`reason-${f.id}`} name="reason" rows={2} required maxLength={1000} />
+                          <ActionButton pendingLabel="Recording…">Record resolution</ActionButton>
+                        </form>
+                      </details>
                     )}
                     {f.status === "resolved" && (
-                      <div className="muted">
-                        Resolved by {f.resolvedBy}: {f.resolutionReason}
-                        {f.acceptedSourceId && <> · filing uses {f.acceptedSourceId}</>}
-                      </div>
+                      <p className="muted">Resolved by {f.resolvedBy} · {f.resolutionReason}{f.acceptedSourceId && ` · Filing uses ${f.acceptedSourceId}`}</p>
                     )}
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-
-          <div className="card scroll">
-            <h2>Observations</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Field</th>
-                  <th>Value</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.observations.map((o) => (
-                  <tr key={o.id}>
-                    <td>{o.field}</td>
-                    <td>
-                      {o.value ?? <em>unknown</em>}
-                      {o.normalized && o.normalized !== o.value && <div className="muted">→ {o.normalized}</div>}
-                    </td>
-                    <td>
-                      <Link href={sourceHref(c.id, o)}>
-                        {o.sourceId} v{o.version}
-                      </Link>
-                      <div className="muted">{where(o.locator)}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            ) : <p className="muted">{c.status === "intake" ? "Waiting for extraction results." : "No findings to review."}</p>}
           </div>
 
           {c.status === "awaiting_approval" && filing && (
             <div className="card">
-              <h2>Prepared filing · revision {c.revision}</h2>
-              <pre>{JSON.stringify(filing, null, 2)}</pre>
-              <form action={approveCase} style={{ marginTop: 12 }}>
-                <input type="hidden" name="caseId" value={c.id} />
-                <input type="hidden" name="revision" value={c.revision} />
-                <button>Approve revision {c.revision} and submit</button>
-              </form>
+              <h2 className="case-card-title"><FileText size={19} /> Prepared filing <span className="badge">Revision {c.revision}</span></h2>
+              <p>{filing.eventDescription}</p>
+              <ul className="evidence-list">
+                {filing.evidence.map((e) => (
+                  <li key={`${e.sourceId}-${e.version}`}><Link href={sourceHref(c.id, e)}>{e.sourceId} · v{e.version}<ArrowUpRight size={16} aria-hidden="true" /></Link></li>
+                ))}
+              </ul>
+              <details><summary>View exact filing payload</summary><pre>{JSON.stringify(filing, null, 2)}</pre></details>
             </div>
+          )}
+          {approval && (
+            <details className="card case-timeline">
+              <summary>Approved payload · revision {approval.revision} · {fmt(approval.createdAt)}</summary>
+              <pre>{JSON.stringify(approval.payload, null, 2)}</pre>
+            </details>
           )}
 
-          {submission && (
-            <div className="card">
-              <h2>
-                Submission <span className="badge sim">simulated portal</span>
-              </h2>
-              {submission.portalReference ? (
-                <p className="notice ok">
-                  Filed as <Link href={`/portal/${submission.portalReference}`}>{submission.portalReference}</Link> · revision{" "}
-                  {submission.approvedRevision} approved by {approval?.approvedBy} at {approval && fmt(approval.createdAt)}
-                </p>
-              ) : (
-                <p className="notice">
-                  Pending · {submission.attempts} attempt(s)
-                  {submission.lastErrorCategory && <> · last error: {submission.lastErrorCategory}</>}
-                </p>
-              )}
-              {approval && (
-                <details>
-                  <summary>Submitted payload (frozen at approval)</summary>
-                  <pre>{JSON.stringify(approval.payload, null, 2)}</pre>
-                </details>
-              )}
+          <details className="card case-timeline">
+            <summary>Extracted observations <span className="badge">{view.observations.length}</span></summary>
+            <div className="scroll">
+              <table>
+                <thead><tr><th>Field</th><th>Value</th><th>Source</th></tr></thead>
+                <tbody>
+                  {view.observations.map((o) => (
+                    <tr key={o.id}>
+                      <td>{FIELD_LABELS[o.field]}</td>
+                      <td>{o.value ?? <em>Unknown</em>}</td>
+                      <td><Link href={sourceHref(c.id, o)}>{o.sourceId} · v{o.version}</Link><div className="muted">{where(o.locator)}</div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
+          </details>
         </section>
       </div>
 
-      <div className="card scroll">
-        <h2>Timeline</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Rev.</th>
-              <th>Operation</th>
-              <th>Result</th>
-              <th>Tool</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.events.map((e) => (
-              <tr key={e.id}>
-                <td>{fmt(e.createdAt)}</td>
-                <td>{e.caseRevision}</td>
-                <td>{e.operation}</td>
-                <td>
-                  {e.result}
-                  {e.errorCategory && ` (${e.errorCategory})`}
-                </td>
-                <td>{e.tool ?? ""}</td>
-                <td>
-                  <code>{e.detail ? JSON.stringify(e.detail) : ""}</code>
-                  {e.latencyMs !== null && <span className="muted"> · {e.latencyMs} ms</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </main>
+      <details className="card case-timeline">
+        <summary>Case timeline <span className="badge">{view.events.length}</span></summary>
+        <div className="scroll">
+          <table>
+            <thead><tr><th>Time</th><th>Revision</th><th>Operation</th><th>Result</th><th>Tool</th><th>Detail</th></tr></thead>
+            <tbody>
+              {view.events.map((e) => (
+                <tr key={e.id}>
+                  <td>{fmt(e.createdAt)}</td>
+                  <td>{e.caseRevision}</td>
+                  <td>{e.operation.replaceAll("_", " ")}</td>
+                  <td>{e.result}{e.errorCategory && ` (${e.errorCategory})`}</td>
+                  <td>{e.tool ?? ""}</td>
+                  <td><code>{e.detail ? JSON.stringify(e.detail) : ""}</code>{e.latencyMs !== null && <span className="muted"> · {e.latencyMs} ms</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </BrokerShell>
   );
 }

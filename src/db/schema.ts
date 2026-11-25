@@ -110,7 +110,7 @@ export const messages = pgTable(
     externalEventId: text("external_event_id"), // inbound: provider event ID, dedupe key
     requestKey: text("request_key").unique(), // outbound: idempotency key for the send
     inReplyTo: uuid("in_reply_to"),
-    status: text("status", { enum: ["received", "pending", "sent", "failed"] }).notNull(),
+    status: text("status", { enum: ["received", "pending", "sent", "failed", "draft", "confirmed", "discarded"] }).notNull(),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     createdAt: createdAt(),

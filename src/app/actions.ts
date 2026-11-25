@@ -9,7 +9,9 @@ import { getDb } from "../server/db.ts";
 import { extractorFor } from "../server/extractor.ts";
 import { and, eq } from "drizzle-orm";
 import { events } from "../db/schema.ts";
-import { approve, openCase, resolveConflict, resumeCase, WorkflowError } from "../workflow/cases.ts";
+import { RequestTopic } from "../domain/customer-request.ts";
+import { draftCustomerRequest, finishCustomerRequest } from "../workflow/customer-requests.ts";
+import { approve, openCase, resolveConflict, resumeCase, retryExtraction, WorkflowError } from "../workflow/cases.ts";
 
 export async function launchFixture(form: FormData) {
   const fixtureId = z.enum(Object.keys(FIXTURE_CASES) as [string, ...string[]]).parse(form.get("fixtureId"));
@@ -34,16 +36,25 @@ export async function approveCase(form: FormData) {
   redirect(`/cases/${caseId}`);
 }
 
-/** Continues an interrupted extraction with the same fixture (or the configured model) and the budget check. */
+/** Continues interrupted extraction or retries failed files for the displayed case revision. */
 export async function resumeExtraction(form: FormData) {
-  const caseId = z.uuid().parse(form.get("caseId"));
+  const { caseId, revision } = z.object({
+    caseId: z.uuid(), revision: z.coerce.number().int().min(1).optional(),
+  }).parse({ caseId: form.get("caseId"), revision: form.get("revision") ?? undefined });
   const db = await getDb();
   const [intake] = await db
     .select({ detail: events.detail })
     .from(events)
     .where(and(eq(events.caseId, caseId), eq(events.operation, "intake")));
   const fixtureId = String(intake?.detail?.fixtureId ?? "");
-  await resumeCase(db, caseId, await extractorFor(db, fixtureId));
+  const extractor = await extractorFor(db, fixtureId);
+  try {
+    if (revision) await retryExtraction(db, caseId, revision, extractor);
+    else await resumeCase(db, caseId, extractor);
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(`/cases/${caseId}?error=${e.code}`);
+    throw e;
+  }
   revalidatePath("/");
   redirect(`/cases/${caseId}`);
 }
@@ -73,4 +84,39 @@ export async function resolveFinding(form: FormData) {
   }
   revalidatePath("/");
   redirect(`/cases/${input.data.caseId}`);
+}
+
+const requestTarget = z.object({ caseId: z.uuid(), revision: z.coerce.number().int().positive() });
+
+export async function createRequestDraft(form: FormData) {
+  const target = requestTarget.parse(Object.fromEntries(form));
+  const topic = RequestTopic.parse(form.get("topic"));
+  const instruction = z.string().trim().max(500).safeParse(form.get("instruction") ?? "");
+  if (!instruction.success || (topic === "other" && !instruction.data)) {
+    redirect(`/cases/${target.caseId}?error=invalid_request#customer-request`);
+  }
+  try {
+    await draftCustomerRequest(await getDb(), { ...target, topic, instruction: instruction.data });
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(`/cases/${target.caseId}?error=${e.code}#customer-request`);
+    throw e;
+  }
+  revalidatePath("/");
+  redirect(`/cases/${target.caseId}#customer-request`);
+}
+
+export async function confirmRequestDraft(form: FormData) {
+  const target = requestTarget.parse(Object.fromEntries(form));
+  const draftId = z.uuid().parse(form.get("draftId"));
+  const intent = z.enum(["send", "discard"]).parse(form.get("intent"));
+  const body = intent === "send" ? z.string().trim().min(1).max(2000).safeParse(form.get("body")) : null;
+  if (body && !body.success) redirect(`/cases/${target.caseId}?error=invalid_request#customer-request`);
+  try {
+    await finishCustomerRequest(await getDb(), { ...target, draftId, body: body?.data ?? null });
+  } catch (e) {
+    if (e instanceof WorkflowError) redirect(`/cases/${target.caseId}?error=${e.code}#customer-request`);
+    throw e;
+  }
+  revalidatePath("/");
+  redirect(`/cases/${target.caseId}#customer-request`);
 }
