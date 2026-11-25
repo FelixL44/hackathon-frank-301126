@@ -13,20 +13,20 @@ async function estimatePdf(repairLines: string[]): Promise<Uint8Array> {
     lines.forEach((line, i) => p.drawText(line, { x: 56, y: 780 - i * 22, size: 11, font }));
   };
   page([
-    "Oficina Exemplo, Lda. (fictícia, apenas para demonstração)",
-    "Orçamento n.º ORC-2026-0457    Data: 20/11/2026",
-    "Matrícula: AA-12-BC",
+    "Example Garage Ltd. (fictitious, for demonstration only)",
+    "Estimate no. EST-2026-0457    Date: 20/11/2026",
+    "Plate: AA-12-BC",
     "",
-    ...repairLines.map((line, i) => `${i + 1}. ${line} ........ 240,00 EUR`),
-    `${repairLines.length + 1}. Mão de obra (3 h) ........ 135,00 EUR`,
+    ...repairLines.map((line, i) => `${i + 1}. ${line} ........ EUR 240.00`),
+    `${repairLines.length + 1}. Labour (3 h) ........ EUR 135.00`,
   ]);
-  page(["Condições gerais", "Validade do orçamento: 30 dias.", "Peças sujeitas a disponibilidade."]);
+  page(["General terms", "This estimate is valid for 30 days.", "Parts subject to availability."]);
   return doc.save();
 }
 
 const files: Record<string, string | Uint8Array> = {
   // F5: the corrected estimate that replaces the F3 one (used from HAC-13 on)
-  "fixtures/F5/estimate-1.v2.pdf": await estimatePdf(["Reparação e pintura do para-choques dianteiro (corrigido)"]),
+  "fixtures/F5/estimate-1.v2.pdf": await estimatePdf(["Repair and paint front bumper (corrected)"]),
 };
 for (const fixture of Object.values(FIXTURE_CASES)) {
   for (const a of fixture.artifacts) {

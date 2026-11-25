@@ -1,26 +1,20 @@
 import { z } from "zod";
+import { LANGUAGES, type Language } from "./language.ts";
 
 export const RequestTopic = z.enum(["clearer_photo", "corrected_estimate", "policy_details", "other"]);
 
-export const REQUEST_TOPICS: Record<z.infer<typeof RequestTopic>, { label: string; text: string }> = {
-  clearer_photo: {
-    label: "Ask for a clearer photo",
-    text: "Pode enviar uma fotografia mais nítida da zona danificada, tirada com boa luz e de forma a identificar a parte do veículo?",
-  },
-  corrected_estimate: {
-    label: "Ask for a corrected estimate",
-    text: "Pode confirmar com a oficina se o orçamento corresponde à zona danificada e enviar uma versão corrigida, se for necessário?",
-  },
-  policy_details: {
-    label: "Ask for policy details",
-    text: "Pode confirmar o número da apólice e a matrícula do veículo?",
-  },
-  other: { label: "Write a custom request", text: "" },
+/** Broker-facing labels (the UI is English); the message texts live per language in language.ts. */
+export const REQUEST_TOPICS: Record<z.infer<typeof RequestTopic>, { label: string }> = {
+  clearer_photo: { label: "Ask for a clearer photo" },
+  corrected_estimate: { label: "Ask for a corrected estimate" },
+  policy_details: { label: "Ask for policy details" },
+  other: { label: "Write a custom request" },
 };
 
-export function requestDraft(reference: string, topic: z.infer<typeof RequestTopic>, instruction: string) {
-  const body = instruction || REQUEST_TOPICS[topic].text;
-  return `Olá,\n\nEstamos a rever o seu processo ${reference}. Para podermos dar seguimento à participação, precisamos da sua ajuda.\n\n${body}\n\nAgradecemos a sua colaboração.\nEquipa de gestão de sinistros`;
+export function requestDraft(language: Language, reference: string, topic: z.infer<typeof RequestTopic>, instruction: string) {
+  const pack = LANGUAGES[language];
+  const body = instruction || (topic === "other" ? "" : pack.requestText[topic]);
+  return pack.requestDraft(reference, body);
 }
 
 export const draftKey = (revision: number) => `broker-draft:${revision}:`;

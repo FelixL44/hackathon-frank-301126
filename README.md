@@ -130,7 +130,11 @@ Only current versions and legible values count. A conflict sends the case to bro
 - **Damaged area:** every area in a photo or estimate must overlap an area in the customer's report (each position is a set of directions: `front_left` overlaps `front` and `left`). A report naming both ends supports either. An `unknown` angle never conflicts. Without areas in the report, the photo is the reference.
 - The free-text event description and the policy number are not compared.
 - **Resolution:** the broker gives a reason and can name the source that is right (`acceptedSourceId`); only that source's values go into the filing. A resolved conflict stays resolved until its evidence changes version.
-- **Grounding:** a quote that names a direction (`dianteiro`, `traseiro`, …) must match the normalized position, or the model must retry.
+- **Grounding:** a quote that names a direction (`front`, `rear`, `dianteiro`, `traseiro`, …) must match the normalized position, or the model must retry. Direction words of every supported language are checked, whatever `APP_LANGUAGE` is.
+
+### Language (`src/domain/language.ts`)
+
+The app writes in `APP_LANGUAGE` (`en` default, `pt`): drafted customer messages and request templates. The UI, the fixtures and the evals are in English. Evidence may arrive in any supported language. All language-specific text sits in that one file; adding a language means adding one entry there.
 
 ### Interrupted extraction
 
@@ -182,6 +186,7 @@ evals/                         (planned, HAC-14) live model evaluation runner an
 | `MODEL_BASE_URL` | for `openai-compatible` | For example `http://localhost:11434/v1` for Ollama |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | for that provider | Server-side only |
 | `MODEL_DAILY_BUDGET_EUR` | no (default `1`) | Model spend per Lisbon day before the app falls back to fixture data |
+| `APP_LANGUAGE` | no (default `en`) | Language of drafted customer messages: `en` or `pt` |
 | `MODEL_PRICE_USD_PER_MTOK` | for `openai` | `<input>,<output>` USD per million tokens from the provider's price list; overrides built-in prices |
 | `STORAGE_DRIVER`, `S3_*` | (planned, deployment) | S3-compatible private bucket |
 | `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | for Slack | Broker notifications |

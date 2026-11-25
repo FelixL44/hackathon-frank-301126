@@ -150,9 +150,9 @@ test("a customer request waits for confirmation and a double confirmation delive
   const draftView = await caseView(db, caseId);
   const drafts = draftView.messages.filter((m) => m.status === "draft");
   assert.equal(drafts.length, 1);
-  assert.match(drafts[0]!.body, /orçamento/);
+  assert.match(drafts[0]!.body, /corrected version/); // APP_LANGUAGE unset → English
   assert.equal(draftView.messages.filter((m) => m.status === "sent").length, 0);
-  const confirmation = { caseId, revision: 1, draftId: drafts[0]!.id, body: "Pode enviar o orçamento corrigido?" };
+  const confirmation = { caseId, revision: 1, draftId: drafts[0]!.id, body: "Could you send the corrected estimate?" };
   await Promise.all([finishCustomerRequest(db, confirmation), finishCustomerRequest(db, confirmation)]);
   const confirmedView = await caseView(db, caseId);
   assert.deepEqual(confirmedView.messages.filter((m) => m.status === "sent").map((m) => m.body), [confirmation.body]);

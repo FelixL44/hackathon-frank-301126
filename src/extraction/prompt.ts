@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { Position, Readability, RequiredField } from "../domain/schema.ts";
 
-export const PROMPT_VERSION = "extract-v2"; // v2: one quote per damaged area
+export const PROMPT_VERSION = "extract-v3"; // v2: one quote per damaged area; v3: evidence in any language (HAC-34)
 
 /**
  * Model-facing shape: flat and provider-friendly (no unions or regex). The app maps it onto the stricter
@@ -20,7 +20,7 @@ export const ModelObservation = z.strictObject({
 export const ModelOutput = z.strictObject({ observations: z.array(ModelObservation) });
 export type ModelOutput = z.infer<typeof ModelOutput>;
 
-export const SYSTEM_PROMPT = `You extract observations from ONE evidence item of a Portuguese motor damage claim. A broker uses them to check whether the case file is complete and consistent.
+export const SYSTEM_PROMPT = `You extract observations from ONE evidence item of a motor damage claim. The item may be written in English or Portuguese. A broker uses them to check whether the case file is complete and consistent.
 
 Fields (report only what this item states; omit a field it does not mention):
 - policyReference: the insurance policy number, as written.
@@ -28,9 +28,9 @@ Fields (report only what this item states; omit a field it does not mention):
 - incidentDate: the date of the incident (not of the document). normalized: YYYY-MM-DD.
 - eventDescription: how the damage happened, a short verbatim phrase. normalized: null.
 - damagedArea: one observation per distinct damaged area. normalized: "<part>:<position>", where part is a lowercase English noun in snake_case (bumper, fender, door, hood, tailgate, headlight, mirror, wheel, …) and position is one of: ${Position.options.join(", ")}.
-  Left and right are seen from the vehicle itself (driver's seat, facing forward), not from the camera. "dianteiro" = front, "traseiro" = rear, "esquerdo" = left, "direito" = right.
+  Left and right are seen from the vehicle itself (driver's seat, facing forward), not from the camera. Portuguese: "dianteiro" = front, "traseiro" = rear, "esquerdo" = left, "direito" = right.
   If a photo does not show whether the damage is at the front or the rear, use position "unknown".
-  For each damaged area, quote only the words that name that area (e.g. "para-choques traseiro"), not a sentence that lists several areas.
+  For each damaged area, quote only the words that name that area (e.g. "rear bumper" or "para-choques traseiro"), not a sentence that lists several areas.
 
 For every observation:
 - value: the original wording in its original language.
