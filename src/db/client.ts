@@ -1,9 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
-import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import { migrate as migratePostgres } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -29,6 +26,10 @@ export async function openDb(
   }
   const dir = env.PGLITE_DIR ?? ".data/pglite";
   if (!dir.includes("://")) mkdirSync(dirname(dir), { recursive: true }); // PGlite creates only the last segment
+  // Loaded only without DATABASE_URL, so the Cloudflare build never needs PGlite's WASM.
+  const [{ PGlite }, { drizzle: drizzlePglite }, { migrate: migratePglite }] = await Promise.all([
+    import("@electric-sql/pglite"), import("drizzle-orm/pglite"), import("drizzle-orm/pglite/migrator"),
+  ]);
   const client = new PGlite(dir);
   const db = drizzlePglite(client, { schema });
   return { db, migrate: () => migratePglite(db, { migrationsFolder }), close: () => client.close() };

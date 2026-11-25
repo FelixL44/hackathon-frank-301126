@@ -8,3 +8,6 @@ next-env.d.ts
 *.tsbuildinfo
 .archify/
 .DS_Store
+.open-next/
+.wrangler/
+.dev.vars
