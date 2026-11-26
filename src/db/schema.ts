@@ -27,6 +27,24 @@ const caseId = () =>
     .notNull()
     .references(() => cases.id);
 
+/** Customer channels (HAC-11). The broker works only in the web app. */
+export const CHANNELS = ["demo", "web", "whatsapp", "teams", "telegram"] as const;
+export type Channel = (typeof CHANNELS)[number];
+
+/** Whoever reports the damage. `address` is how the channel reaches them, e.g. a WhatsApp number. */
+export const customers = pgTable(
+  "customers",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    channel: text("channel", { enum: CHANNELS }).notNull(),
+    address: text("address").notNull(),
+    createdAt: createdAt(),
+  },
+  // An inbound WhatsApp message finds its customer by number.
+  (t) => [unique("customers_one_per_address").on(t.channel, t.address)],
+).enableRLS();
+
 export const cases = pgTable("cases", {
   id: id(),
   reference: text("reference").notNull().unique(),
@@ -35,6 +53,8 @@ export const cases = pgTable("cases", {
   replyToken: text("reply_token").notNull().unique(),
   policyReference: text("policy_reference"),
   vehicleId: text("vehicle_id"),
+  customerId: uuid("customer_id").references(() => customers.id), // null for cases opened before HAC-35
+  assignedTo: text("assigned_to"), // broker identity; null = unassigned
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }).enableRLS();
@@ -104,7 +124,7 @@ export const messages = pgTable(
     id: id(),
     caseId: caseId(),
     direction: text("direction", { enum: ["inbound", "outbound"] }).notNull(),
-    channel: text("channel", { enum: ["demo", "email", "slack", "teams"] }).notNull(),
+    channel: text("channel", { enum: CHANNELS }).notNull(),
     role: text("role", { enum: ["customer", "workshop", "broker"] }).notNull(), // sender (inbound) or recipient (outbound)
     body: text("body").notNull(),
     externalEventId: text("external_event_id"), // inbound: provider event ID, dedupe key
@@ -118,37 +138,18 @@ export const messages = pgTable(
   (t) => [unique("messages_inbound_dedupe").on(t.channel, t.externalEventId)],
 ).enableRLS();
 
-export const tasks = pgTable("tasks", {
-  id: id(),
-  caseId: caseId(),
-  caseRevision: integer("case_revision").notNull(),
-  kind: text("kind", { enum: ["review_conflict", "review_invalid_extraction", "submission_failed"] }).notNull(),
-  findingIds: jsonb("finding_ids").$type<string[]>().notNull().default([]),
-  status: text("status", { enum: ["open", "done"] }).notNull().default("open"),
-  createdAt: createdAt(),
-}).enableRLS();
-
-/** One approval per case revision: a double click hits the unique key and creates no second row. */
-export const approvals = pgTable(
-  "approvals",
-  {
-    id: id(),
-    caseId: caseId(),
-    revision: integer("revision").notNull(),
-    approvedBy: text("approved_by").notNull(),
-    payload: jsonb("payload").$type<ClaimFiling>().notNull(), // frozen snapshot
-    createdAt: createdAt(),
-  },
-  (t) => [unique("approvals_one_per_revision").on(t.caseId, t.revision)],
-).enableRLS();
-
-/** Submission outbox: one row per approved revision, retried with the same idempotency key. */
+/**
+ * The broker's approval of one revision and its submission outbox in one row. A double click hits the unique key and
+ * creates nothing; retries reuse the same idempotency key.
+ */
 export const submissions = pgTable(
   "submissions",
   {
     id: id(),
     caseId: caseId(),
     approvedRevision: integer("approved_revision").notNull(),
+    approvedBy: text("approved_by").notNull(),
+    payload: jsonb("payload").$type<ClaimFiling>().notNull(), // frozen at approval
     idempotencyKey: text("idempotency_key").notNull().unique(),
     status: text("status", { enum: ["pending", "succeeded", "failed"] }).notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),

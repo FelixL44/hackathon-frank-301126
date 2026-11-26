@@ -4,6 +4,7 @@ import type { z } from "zod";
 import type { Db } from "../db/client.ts";
 import { cases, events, messages } from "../db/schema.ts";
 import { draftKey, requestDraft, sentKey, type RequestTopic } from "../domain/customer-request.ts";
+import { appLanguage } from "../domain/language.ts";
 import { WorkflowError } from "./cases.ts";
 
 type RequestTarget = { caseId: string; revision: number };
@@ -32,7 +33,7 @@ export async function draftCustomerRequest(
     const [draft] = await tx.insert(messages).values({
       caseId: c.id, direction: "outbound", channel: "demo", role: "customer", status: "draft",
       requestKey: `${draftKey(c.revision)}${randomUUID()}`,
-      body: requestDraft(c.reference, input.topic, input.instruction),
+      body: requestDraft(appLanguage(process.env), c.reference, input.topic, input.instruction),
     }).returning({ id: messages.id });
     await tx.insert(events).values({
       caseId: c.id, caseRevision: c.revision, operation: "draft_customer_request", result: "ok",

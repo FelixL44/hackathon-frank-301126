@@ -14,9 +14,9 @@ const quote = (sourceId: string, text: string) => ({
 test("text locator needs a page", () => {
   const obs = {
     field: "damagedArea",
-    value: "para-choques dianteiro",
+    value: "front bumper",
     normalized: "bumper:front",
-    locator: { type: "text", quote: "para-choques dianteiro" },
+    locator: { type: "text", quote: "front bumper" },
     readability: "legible",
   };
   assert.equal(ProposedObservation.safeParse(obs).success, false);
@@ -50,13 +50,13 @@ test("a conflict cites two different sources", () => {
     caseId: id,
     rule: "conflict",
     field: "damagedArea",
-    evidence: [quote("message-1", "para-choques dianteiro")],
+    evidence: [quote("message-1", "front bumper")],
     explanation: "Customer reports front, estimate says rear.",
     status: "open",
     resolution: null,
   };
   assert.equal(Finding.safeParse(finding).success, false);
-  const both = { ...finding, evidence: [...finding.evidence, quote("estimate-1", "para-choques traseiro")] };
+  const both = { ...finding, evidence: [...finding.evidence, quote("estimate-1", "rear bumper")] };
   assert.equal(Finding.safeParse(both).success, true);
   assert.equal(Finding.safeParse({ ...both, status: "resolved" }).success, false);
   assert.equal(
@@ -72,7 +72,7 @@ test("filing requires every field", () => {
     policyReference: "POL-123",
     vehicleId: "AA-00-AA",
     incidentDate: "2026-11-20",
-    eventDescription: "Ao estacionar, danifiquei o para-choques dianteiro.",
+    eventDescription: "While parking I damaged the front bumper.",
     damagedArea: ["bumper:front"],
     evidence: [{ sourceId: "estimate-1", version: 2 }],
   };

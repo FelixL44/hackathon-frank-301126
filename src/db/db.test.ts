@@ -7,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { eq } from "drizzle-orm";
 import { openDb, type Db } from "./client.ts";
-import { approvals, artifacts, cases, messages, observations, submissions } from "./schema.ts";
+import { artifacts, cases, customers, messages, observations, submissions } from "./schema.ts";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -66,7 +66,7 @@ test("replayed inbound event is stored once", async () => {
     direction: "inbound" as const,
     channel: "demo" as const,
     role: "workshop" as const,
-    body: "Segue orçamento corrigido.",
+    body: "Here is the corrected estimate.",
     externalEventId: "evt-42",
     status: "received" as const,
   };
@@ -76,19 +76,20 @@ test("replayed inbound event is stored once", async () => {
   assert.equal(replay.length, 0);
 });
 
-test("double approval click creates one approval", async () => {
-  const c = await newCase("CLM-APR");
-  const approval = { caseId: c.id, revision: 1, approvedBy: "demo-broker", payload: filing };
-  assert.equal((await db.insert(approvals).values(approval).onConflictDoNothing().returning()).length, 1);
-  assert.equal((await db.insert(approvals).values(approval).onConflictDoNothing().returning()).length, 0);
+test("double approval click creates one approval + submission row", async () => {
+  const c = await newCase("CLM-SUB");
+  const row = { caseId: c.id, approvedRevision: 1, approvedBy: "demo-broker", payload: filing, idempotencyKey: `${c.id}:1` };
+  assert.equal((await db.insert(submissions).values(row).onConflictDoNothing().returning()).length, 1);
+  assert.equal((await db.insert(submissions).values(row).onConflictDoNothing().returning()).length, 0);
+  // the same revision with a different key is still rejected: one submission per approved revision
+  await assert.rejects(db.insert(submissions).values({ ...row, idempotencyKey: `${c.id}:1-again` }));
 });
 
-test("one submission per approved revision", async () => {
-  const c = await newCase("CLM-SUB");
-  await db.insert(submissions).values({ caseId: c.id, approvedRevision: 1, idempotencyKey: `${c.id}:1` });
-  await assert.rejects(
-    db.insert(submissions).values({ caseId: c.id, approvedRevision: 1, idempotencyKey: `${c.id}:1-again` }),
-  );
+test("one customer per channel address", async () => {
+  const ana = { name: "Ana", channel: "whatsapp" as const, address: "+351900000099" };
+  await db.insert(customers).values(ana);
+  await assert.rejects(db.insert(customers).values({ ...ana, name: "Someone else" }));
+  await db.insert(customers).values({ ...ana, channel: "telegram" }); // same address on another channel is another account
 });
 
 test("failed transaction leaves no partial state", async () => {

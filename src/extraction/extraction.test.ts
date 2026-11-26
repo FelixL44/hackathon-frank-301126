@@ -11,10 +11,10 @@ const estimate = { sourceId: "estimate-1", kind: "estimate" as const, mediaType:
 
 const obs = (over: Record<string, unknown> = {}) => ({
   field: "damagedArea",
-  value: "para-choques dianteiro",
+  value: "front bumper",
   normalized: "bumper:front",
   readability: "legible",
-  quote: "risquei o para-choques dianteiro",
+  quote: "damaged the front bumper",
   page: 1,
   visualDescription: null,
   ...over,
@@ -37,11 +37,20 @@ const fakeProvider = (...answers: unknown[]) => {
 };
 
 test("quotes match despite case, whitespace and quote style", () => {
+  assert.ok(quoteOnPage(["Repair and   paint\nrear bumper"], "paint Rear Bumper", 1));
   assert.ok(quoteOnPage(["Reparação e   pintura do\npara-choques traseiro"], "pintura do Para-Choques traseiro", 1));
   assert.ok(!quoteOnPage(["só a página 1"], "só a página 1", 2));
 });
 
 test("a quote saying rear cannot be normalized to front", () => {
+  assert.match(directionMismatch("paint rear bumper", "bumper:front")!, /says rear/);
+  assert.match(directionMismatch("dent in the back bumper", "bumper:front")!, /says rear/);
+  assert.equal(directionMismatch("front and rear bumper", "bumper:rear"), null); // either end is named
+  assert.equal(directionMismatch("front left fender", "bumper:front_left"), null);
+  assert.equal(directionMismatch("scratch on the bumper", "bumper:rear"), null); // no direction word, nothing to check
+});
+
+test("Portuguese evidence is checked too, whatever the app language", () => {
   assert.match(directionMismatch("pintura do para-choques traseiro", "bumper:front")!, /says rear/);
   assert.equal(directionMismatch("para-choques dianteiro e traseiro", "bumper:rear"), null); // either end is named
   assert.equal(directionMismatch("para-choques dianteiro esquerdo", "bumper:front_left"), null);
@@ -51,19 +60,19 @@ test("a quote saying rear cannot be normalized to front", () => {
 test("generated estimate PDF has the rear-bumper line on page 1 of 2", async () => {
   const pages = await pdfPages(await readObject(estimate.objectKey));
   assert.equal(pages.length, 2);
-  assert.ok(quoteOnPage(pages, "pintura do para-choques traseiro", 1));
+  assert.ok(quoteOnPage(pages, "Repair and paint rear bumper", 1));
 });
 
 test("grounded output becomes observations with a text locator", async () => {
   const { provider } = fakeProvider({ observations: [obs()] });
   const { observations, attempts } = await modelExtractor(provider).extract(message);
   assert.equal(attempts, 1);
-  assert.deepEqual(observations[0]!.locator, { type: "text", quote: "risquei o para-choques dianteiro", page: 1 });
+  assert.deepEqual(observations[0]!.locator, { type: "text", quote: "damaged the front bumper", page: 1 });
 });
 
 test("an invented quote is sent back with the reason and fixed on retry", async () => {
   const { provider, requests } = fakeProvider(
-    { observations: [obs({ quote: "para-choques traseiro" })] },
+    { observations: [obs({ quote: "the rear bumper" })] },
     { observations: [obs()] },
   );
   const { attempts, costEur } = await modelExtractor(provider).extract(message);
@@ -109,5 +118,5 @@ test("refusals and missing files are not retried", async () => {
 
 test("object keys cannot escape the storage root", async () => {
   await assert.rejects(readObject("fixtures/../package.json"), /escapes/);
-  assert.ok((await readFile("fixtures/files/F1/message-1.txt", "utf8")).includes("dianteiro"));
+  assert.ok((await readFile("fixtures/files/F1/message-1.txt", "utf8")).includes("front bumper"));
 });

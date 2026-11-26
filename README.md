@@ -6,52 +6,52 @@ A broker-facing app for a Portuguese insurance broker. Motor damage is the main 
 
 The agent checks whether the **case** is complete and consistent. It does not score customer credibility, decide on fraud, liability or coverage, or calculate payouts.
 
-> **Status:** vertical slice (HAC-7): a seeded consistent claim goes from intake to approval to a simulated portal receipt, with fixture-backed extraction (no model yet). Commands marked *(planned)* do not work yet.
+> **Status (25 Nov):** a seeded case runs from intake through model extraction (Claude or OpenAI, fixture fallback), comparison, broker review and approval to a simulated portal receipt, in the FRANK broker UI. Not built yet: channels (WhatsApp), categories, customer and admin views, portal retries, evals. Commands marked *(planned)* do not work yet.
 
 ## Team plan
 
-Agreed in the team call on 24 Nov 2026. Issues HAC-24 to HAC-33 in Linear track the work; the full notes are the Linear project document "Team plan after the call on 24 Nov 2026".
+Agreed in the team call on 24 Nov 2026 and refined on 25 Nov. Issues from HAC-24 on in Linear track the work; the full notes are the Linear project document "Team plan after the call on 24 Nov 2026".
 
 **Who the app is for.** An insurance **broker**, not an insurer. Customers send their damage report to the broker. The agent collects and checks the evidence, the broker reviews it and forwards the claim to the insurer (the simulated portal). The brief judges reliability and design choices as much as the demo: tools, orchestration, memory, retries and evaluations.
 
 **Decisions**
 
 1. **Keep this repo** and build on the existing flow: open case → extraction → decision → approval → portal receipt.
-2. **Modular claim categories.** Motor stays the main demo. An admin can add a category and configure the agent for it: prompt, required documents and fields, rules, context files and examples. The demo ships 2–3 categories.
+2. **Modular claim categories.** Motor stays the main demo. An admin can add a category and configure the agent for it: prompt, required documents and fields, rules, context files and examples. Still open (HAC-24): how many categories ship and whether the agent detects the category itself.
 3. **Three views**, all backed by the database:
-   - **Customer:** upload documents, chat with the agent, see own cases.
-   - **Broker:** assigned cases, the agent's assessment and findings next to the sources, approve and forward, ask the customer for more.
+   - **Customer:** upload documents, see own cases and the messages the broker sent.
+   - **Broker:** assigned cases, the agent's assessment and findings next to the sources, drafted messages to approve, approve and forward.
    - **Admin:** categories, agent configuration, context documents.
-4. **Channels.** One generic inbound endpoint (`POST /api/channels/:channel/webhook`). Demo channel: **WhatsApp Business**; only the broker needs a Business account. Telegram is the fallback; the web chat always works.
-5. **Conversational intake.** The agent asks the customer for the damage type, the estimate, photos and policy data, and asks again when something is missing or unreadable.
-6. **The broker confirms every outgoing message.** The broker clicks a short action or writes a short instruction; the agent drafts a polite message; the broker confirms it before it goes out. The agent never contacts the customer on its own.
+4. **Channels.** One generic inbound endpoint (`POST /api/channels/:channel/webhook`). Customers write via **WhatsApp** (the demo channel; only the broker needs a Business account), Teams is optional, Telegram the fallback; the web upload always works. The broker works only in the web app.
+5. **Intake checks.** The agent reads everything the customer sends and tells the broker what is wrong or missing ("the photo does not show the damage", "estimate missing").
+6. **Human in the loop for every outgoing message.** For each gap the agent drafts a polite message (salutation, name, what is needed). The broker approves it, edits it or writes their own; only then it is sent. The agent never contacts the customer on its own, not even during intake.
 7. **Reliability.** Retries with a visible warning and a one-click retry when extraction fails; stress tests and evaluations stay in scope.
-8. **Language.** Multi-language. Test and evaluation data in English so the team can check it; Portuguese stays supported for the demo.
+8. **Language.** English for the demo, UI, prompts, drafted messages, fixtures and evals. Language-specific text sits in one place per language, so Portuguese can be switched in later.
 9. **Database.** Supabase as the shared test database, Postgres/PGlite locally through Drizzle. Each table gets a one-line explanation (HAC-31).
 
 **Who does what**
 
 | Person | Area |
 | --- | --- |
-| Felix | Backend and LLM: agent, categories, conversational intake, drafted messages, schema, Supabase |
-| Frederik | WhatsApp Business integration (Telegram fallback), FRANK style guide, frontend support |
-| Emre | Frontend: customer, broker and admin views; README and Linear |
+| Felix | Backend and LLM: agent, categories, intake checks, channel endpoint, schema, Supabase |
+| Frederik | WhatsApp integration (Teams optional, Telegram fallback), FRANK style guide, frontend support |
+| Emre | Frontend: customer, broker and admin views, drafted messages (HAC-26); README and Linear |
 
 **How we work**
 
-- One branch per feature, pull request into `main`. A `staging` branch for testing features together is proposed.
+- One branch per feature, cut from `staging`, pull request into `staging`. When `staging` works end to end, a release PR `staging → main` (merge commit, no squash) updates `main`, which stays demo-ready.
 - Every Claude session records its work in Linear.
-- Open questions: a cheaper model for development (Claude for the demo is agreed), the exact demo categories, and whether a WhatsApp Business account is possible this week.
+- Open questions: a cheaper model for development (Claude for the demo is agreed), categories (HAC-24), and whether a WhatsApp Business account is possible this week.
 
 ## Demo scenario
 
-1. The customer writes: "Ao estacionar, danifiquei o para-choques dianteiro." A photo shows a scratched **front** bumper.
-2. Page 1 of the workshop estimate says "pintura do para-choques **traseiro**" (rear).
-3. The agent flags the front/rear conflict, cites both sources and pauses.
-4. The broker requests clarification, and a corrected estimate arrives in the same case. The original estimate is kept.
+1. The customer writes on WhatsApp: "While parking I damaged the front bumper." A photo shows a scratched **front** bumper.
+2. Page 1 of the workshop estimate says "paint **rear** bumper".
+3. The agent flags the front/rear conflict, cites both sources and drafts a message asking for a corrected estimate.
+4. The broker approves the draft, and a corrected estimate arrives in the same case. The original estimate is kept.
 5. The broker approves the current revision. The simulated portal returns a receipt.
 
-A second seeded case with a blurry photo shows how ambiguity changes the next action: the agent asks for a clearer photo.
+A second seeded case with a blurry photo shows how ambiguity changes the next action: the agent flags it and drafts a request for a clearer photo, which the broker approves.
 
 ## Architecture
 
@@ -70,8 +70,8 @@ One Next.js application serves the broker UI, the orchestration and the simulate
 
 ```
                  ┌────────────── ports ──────────────┐
- Slack / Teams ─▶│ Channel   (inbound + outbound)    │
- Email/Outlook ─▶│                                   │──▶ workflow + decision policy
+ WhatsApp      ─▶│ Channel   (inbound + outbound)    │
+ Teams / web   ─▶│                                   │──▶ workflow + decision policy
  Demo inbox    ─▶│ ModelProvider (extraction)        │      (pure, fixture-tested)
                  │ Database / ObjectStorage          │
                  └───────────────────────────────────┘
@@ -83,22 +83,22 @@ There are two kinds of traffic:
 
 | Traffic | Who | Channels |
 | --- | --- | --- |
-| Correspondence | Customer, workshop | Demo inbox (MVP), email/Outlook (next) |
-| Notifications and actions | Broker | In-app inbox (MVP), Slack, Teams (next) |
+| Correspondence | Customer | WhatsApp (demo), Teams (optional), Telegram (fallback), web upload, demo inbox (tests) |
+| Review and actions | Broker | Web app only |
 
 Every channel implements the same port:
 
 ```ts
 interface Channel {
-  id: "demo" | "email" | "slack" | "teams";
+  id: "demo" | "web" | "whatsapp" | "teams" | "telegram";
   // Verify the provider signature, then normalize the payload. Never trust the payload.
   parseInbound(req: Request): Promise<InboundEvent[]>;
   send(msg: OutboundMessage): Promise<{ externalId: string }>;
 }
 ```
 
-- **One inbound endpoint:** `POST /api/channels/:channel/webhook`. The adapter verifies the signature, the event is deduplicated on `(channel, externalEventId)`, and a case-scoped reply token links it to its case. Possible tokens are an email plus-address, a Slack `thread_ts` or a Teams conversation ID. The workflow then recomputes the decision.
-- **Outbound through an outbox:** the state change and the pending message are written in one transaction. A worker sends the message, keyed by request ID, so a retry never sends it twice.
+- **One inbound endpoint:** `POST /api/channels/:channel/webhook`. The adapter verifies the signature, the event is deduplicated on `(channel, externalEventId)`, and a case-scoped reply token links it to its case. Possible tokens are the customer's WhatsApp number or a Teams conversation ID. The workflow then recomputes the decision.
+- **Outbound only after broker approval:** the agent's draft becomes a pending message only when the broker approves it; that change and the message are written in one transaction. A worker sends the message, keyed by request ID, so a retry never sends it twice.
 - **Inbound content is evidence only.** Text in a message or attachment is never treated as an instruction to the agent.
 
 ### 2. Model provider: bring your own AI
@@ -130,7 +130,11 @@ Only current versions and legible values count. A conflict sends the case to bro
 - **Damaged area:** every area in a photo or estimate must overlap an area in the customer's report (each position is a set of directions: `front_left` overlaps `front` and `left`). A report naming both ends supports either. An `unknown` angle never conflicts. Without areas in the report, the photo is the reference.
 - The free-text event description and the policy number are not compared.
 - **Resolution:** the broker gives a reason and can name the source that is right (`acceptedSourceId`); only that source's values go into the filing. A resolved conflict stays resolved until its evidence changes version.
-- **Grounding:** a quote that names a direction (`dianteiro`, `traseiro`, …) must match the normalized position, or the model must retry.
+- **Grounding:** a quote that names a direction (`front`, `rear`, `dianteiro`, `traseiro`, …) must match the normalized position, or the model must retry. Direction words of every supported language are checked, whatever `APP_LANGUAGE` is.
+
+### Language (`src/domain/language.ts`)
+
+The app writes in `APP_LANGUAGE` (`en` default, `pt`): drafted customer messages and request templates. The UI, the fixtures and the evals are in English. Evidence may arrive in any supported language. All language-specific text sits in that one file; adding a language means adding one entry there.
 
 ### Interrupted extraction
 
@@ -142,6 +146,20 @@ Each file's observations, findings and `extract` event are written in one transa
 - If `DATABASE_URL` is not set, the app uses in-process **PGlite** for tests and zero-setup local runs.
 - The ORM and migrations are **Drizzle**. All queries live in `src/db/`.
 - Several dialects (MySQL, SQLite, MongoDB) are deliberately not supported. Reliability depends on transactions, unique constraints, row locks and JSONB, and every extra dialect would multiply the test matrix. Swapping the repository layer later stays possible.
+- **Tables** (`src/db/schema.ts`), one line each:
+
+  | Table | Holds | Why it exists |
+  | --- | --- | --- |
+  | `customers` | Name, channel and address (e.g. WhatsApp number) of whoever reports damage | An inbound message finds its customer; the customer view lists their own cases |
+  | `cases` | One claim: reference, revision, status, customer, assigned broker | The unit the broker works on; the revision ties approvals to the evidence they saw |
+  | `artifacts` | Every version of every evidence file (message, photo, estimate) | Corrections add a version and never overwrite the original |
+  | `observations` | Each value the agent read, with source, version and quote or photo description | Every finding links back to the exact place in the source |
+  | `findings` | Conflicts and gaps, and how the broker resolved them | Drives the next action and the broker's review |
+  | `messages` | Inbound messages and outbound drafts/sends | Dedupes replayed webhooks; nothing goes out without broker approval |
+  | `submissions` | The broker's approval of one revision plus the portal send state | One row per revision: a double click or retry never files twice |
+  | `portal_receipts` | Receipts of the **simulated** insurer portal | Stands in for the foreign system; returns the same receipt on repeat calls |
+  | `events` | Timeline: every step, tool, model, latency, error and cost | Audit trail, retry trace and the daily model budget |
+
 - **Object storage** (`src/storage/objects.ts`): local files now (`fixtures/files/` for synthetic evidence, `.data/objects/` otherwise). An S3-compatible driver (AWS S3, Cloudflare R2, MinIO, Supabase Storage) comes with deployment.
 
 ### Simulated services
@@ -182,6 +200,7 @@ evals/                         (planned, HAC-14) live model evaluation runner an
 | `MODEL_BASE_URL` | for `openai-compatible` | For example `http://localhost:11434/v1` for Ollama |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | for that provider | Server-side only |
 | `MODEL_DAILY_BUDGET_EUR` | no (default `1`) | Model spend per Lisbon day before the app falls back to fixture data |
+| `APP_LANGUAGE` | no (default `en`) | Language of drafted customer messages: `en` or `pt` |
 | `MODEL_PRICE_USD_PER_MTOK` | for `openai` | `<input>,<output>` USD per million tokens from the provider's price list; overrides built-in prices |
 | `STORAGE_DRIVER`, `S3_*` | (planned, deployment) | S3-compatible private bucket |
 | `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | for Slack | Broker notifications |

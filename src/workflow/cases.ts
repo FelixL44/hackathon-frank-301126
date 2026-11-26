@@ -3,7 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { approvals, artifacts, cases, events, findings, messages, observations, submissions } from "../db/schema.ts";
+import { artifacts, cases, customers, events, findings, messages, observations, submissions, type Channel } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { compareSources, conflictKey } from "../domain/compare.ts";
 import { currentArtifacts, prepareFiling } from "../domain/filing.ts";
@@ -42,7 +42,8 @@ export class WorkflowError extends Error {
   }
 }
 
-const BROKER = "demo-broker"; // shortcut: single demo session, no auth; replace with real identity before multi-user use
+// shortcut: single demo broker, no auth; every new case is assigned to it. Replace with real identity and an assignment rule before multi-user use.
+const BROKER = "demo-broker";
 
 async function logEvent(
   db: Exec,
@@ -81,27 +82,42 @@ export async function caseView(db: Db, caseId: string) {
   const history = await db.select().from(events).where(eq(events.caseId, caseId)).orderBy(asc(events.id));
   return {
     ...state,
+    customer: state.case.customerId
+      ? ((await db.select().from(customers).where(eq(customers.id, state.case.customerId)))[0] ?? null)
+      : null,
     failedSources: failedExtractions(state, history).map(({ artifact }) => artifact.sourceId),
     messages: await db.select().from(messages).where(eq(messages.caseId, caseId)).orderBy(asc(messages.createdAt)),
-    events: history,
-    submission: (await db.select().from(submissions).where(eq(submissions.caseId, caseId)))[0] ?? null,
-    approval:
-      (await db.select().from(approvals).where(eq(approvals.caseId, caseId)).orderBy(asc(approvals.revision))).at(-1) ??
-      null,
+    events: await db.select().from(events).where(eq(events.caseId, caseId)).orderBy(asc(events.id)),
+    submission:
+      (
+        await db.select().from(submissions).where(eq(submissions.caseId, caseId)).orderBy(asc(submissions.approvedRevision))
+      ).at(-1) ?? null,
   };
 }
 
+export type NewCustomer = { name: string; channel: Channel; address: string };
+
 export async function openCase(
   db: Db,
-  input: { message: string; artifacts: NewArtifact[]; fixtureId?: string },
+  input: { message: string; artifacts: NewArtifact[]; fixtureId?: string; customer?: NewCustomer },
   extractor: Extractor,
 ): Promise<string> {
   const c = await db.transaction(async (tx) => {
+    // A known number or account gets the same customer row, so all their cases show up together.
+    const [customer] = input.customer
+      ? await tx
+          .insert(customers)
+          .values(input.customer)
+          .onConflictDoUpdate({ target: [customers.channel, customers.address], set: { name: input.customer.name } })
+          .returning()
+      : [];
     const [row] = await tx
       .insert(cases)
       .values({
         reference: `CLM-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`,
         replyToken: randomBytes(16).toString("hex"),
+        customerId: customer?.id ?? null,
+        assignedTo: BROKER,
       })
       .returning();
     await tx.insert(artifacts).values(input.artifacts.map((a) => ({ ...a, caseId: row!.id, version: 1, supersedesVersion: null })));
@@ -360,10 +376,9 @@ export async function approve(db: Db, caseId: string, revision: number, portal: 
     // The payload is rebuilt server-side from stored evidence, never taken from the browser.
     const { filing } = await loadCase(tx, caseId);
     if (!filing) throw new WorkflowError("not_ready", "filing is incomplete");
-    await tx.insert(approvals).values({ caseId, revision, approvedBy: BROKER, payload: filing }).onConflictDoNothing();
     await tx
       .insert(submissions)
-      .values({ caseId, approvedRevision: revision, idempotencyKey: `${caseId}:${revision}` })
+      .values({ caseId, approvedRevision: revision, approvedBy: BROKER, payload: filing, idempotencyKey: `${caseId}:${revision}` })
       .onConflictDoNothing();
     await tx.update(cases).set({ status: "submitting", updatedAt: new Date() }).where(eq(cases.id, caseId));
     await logEvent(tx, locked, "approve", { sideEffect: "submit_claim", detail: { by: BROKER } });
@@ -379,15 +394,11 @@ export async function dispatch(db: Db, caseId: string, portal: Portal) {
     .from(submissions)
     .where(and(eq(submissions.caseId, caseId), eq(submissions.status, "pending")));
   if (!sub) return;
-  const [approval] = await db
-    .select()
-    .from(approvals)
-    .where(and(eq(approvals.caseId, caseId), eq(approvals.revision, sub.approvedRevision)));
   const c = { id: caseId, revision: sub.approvedRevision };
   const started = Date.now();
   await db.update(submissions).set({ attempts: sub.attempts + 1, updatedAt: new Date() }).where(eq(submissions.id, sub.id));
   try {
-    const { portalReference } = await portal.submit(sub.idempotencyKey, approval!.payload);
+    const { portalReference } = await portal.submit(sub.idempotencyKey, sub.payload);
     await db.transaction(async (tx) => {
       await tx
         .update(submissions)

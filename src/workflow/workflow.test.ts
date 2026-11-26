@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { FIXTURE_CASES, fixtureExtractor } from "../../fixtures/cases.ts";
 import { openDb, type Db } from "../db/client.ts";
-import { approvals, cases, observations, portalReceipts, submissions } from "../db/schema.ts";
+import { cases, observations, portalReceipts, submissions } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { simulatedPortal } from "../portal/simulated.ts";
 import { ExtractionError } from "../extraction/model-extractor.ts";
@@ -21,8 +21,7 @@ before(async () => {
 after(() => close());
 
 const openF1 = () => openCase(db, FIXTURE_CASES["F1-consistent"]!, fixtureExtractor("F1-consistent"));
-const count = async (table: typeof approvals | typeof submissions, caseId: string) =>
-  (await db.select().from(table).where(eq(table.caseId, caseId))).length;
+const count = async (caseId: string) => (await db.select().from(submissions).where(eq(submissions.caseId, caseId))).length;
 
 test("decision table: first matching rule wins", () => {
   assert.equal(decide([]).status, "awaiting_approval");
@@ -39,6 +38,16 @@ test("F1: consistent claim waits for broker approval with a valid filing", async
   assert.equal(state.case.policyReference, "POL-2026-000123");
 });
 
+test("a returning customer keeps one row and sees all their cases; new cases are assigned to the broker", async () => {
+  const first = await caseView(db, await openF1());
+  const second = await caseView(db, await openCase(db, FIXTURE_CASES["F3-front-rear-conflict"]!, fixtureExtractor("F3-front-rear-conflict")));
+  assert.equal(first.customer?.name, "Ana Ferreira");
+  assert.equal(second.customer?.id, first.customer?.id);
+  assert.equal(first.case.assignedTo, "demo-broker");
+  const own = await db.select().from(cases).where(eq(cases.customerId, first.customer!.id));
+  assert.ok(own.length >= 2);
+});
+
 test("approval submits once and stores the portal receipt; a double click changes nothing", async () => {
   const id = await openF1();
   const portal = simulatedPortal(db);
@@ -47,8 +56,8 @@ test("approval submits once and stores the portal receipt; a double click change
   const [sub] = await db.select().from(submissions).where(eq(submissions.caseId, id));
   assert.equal(sub!.status, "succeeded");
   assert.match(sub!.portalReference!, /^SIM-/);
-  assert.equal(await count(approvals, id), 1);
-  assert.equal(await count(submissions, id), 1);
+  assert.equal(await count(id), 1); // one approval + submission row
+  assert.equal(sub!.approvedBy, "demo-broker");
   const receipts = await db.select().from(portalReceipts).where(eq(portalReceipts.idempotencyKey, sub!.idempotencyKey));
   assert.equal(receipts.length, 1);
   assert.equal((await loadCase(db, id)).case.status, "submitted");
@@ -68,7 +77,7 @@ test("approving a stale revision is rejected and submits nothing", async () => {
   await assert.rejects(approve(db, id, 1, simulatedPortal(db)), (e: unknown) => {
     return e instanceof WorkflowError && e.code === "stale_approval";
   });
-  assert.equal(await count(submissions, id), 0);
+  assert.equal(await count(id), 0);
 });
 
 test("failed extraction routes to broker review with the reason, and recompute keeps it", async () => {
@@ -151,9 +160,9 @@ test("a customer request waits for confirmation and a double confirmation delive
   const draftView = await caseView(db, caseId);
   const drafts = draftView.messages.filter((m) => m.status === "draft");
   assert.equal(drafts.length, 1);
-  assert.match(drafts[0]!.body, /orçamento/);
+  assert.match(drafts[0]!.body, /corrected version/); // APP_LANGUAGE unset → English
   assert.equal(draftView.messages.filter((m) => m.status === "sent").length, 0);
-  const confirmation = { caseId, revision: 1, draftId: drafts[0]!.id, body: "Pode enviar o orçamento corrigido?" };
+  const confirmation = { caseId, revision: 1, draftId: drafts[0]!.id, body: "Could you send the corrected estimate?" };
   await Promise.all([finishCustomerRequest(db, confirmation), finishCustomerRequest(db, confirmation)]);
   const confirmedView = await caseView(db, caseId);
   assert.deepEqual(confirmedView.messages.filter((m) => m.status === "sent").map((m) => m.body), [confirmation.body]);
