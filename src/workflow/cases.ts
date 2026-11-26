@@ -3,7 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { artifacts, cases, customers, events, findings, messages, observations, submissions, type Channel } from "../db/schema.ts";
+import { artifacts, cases, customers, events, findings, messages, observations, submissions, type Channel, type MessageAttachment } from "../db/schema.ts";
 import { decide } from "../domain/decide.ts";
 import { compareSources, conflictKey } from "../domain/compare.ts";
 import { currentArtifacts, prepareFiling } from "../domain/filing.ts";
@@ -35,7 +35,14 @@ export type Extractor = {
 const DERIVED_RULES: FindingRule[] = ["missing", "illegible", "ambiguous", "conflict"];
 
 export class WorkflowError extends Error {
-  readonly code: "not_found" | "stale_approval" | "not_ready" | "invalid_resolution" | "stale_request" | "request_unavailable";
+  readonly code:
+    | "not_found"
+    | "stale_approval"
+    | "not_ready"
+    | "invalid_resolution"
+    | "stale_request"
+    | "request_unavailable"
+    | "invalid_upload";
   constructor(code: WorkflowError["code"], message: string) {
     super(message);
     this.code = code;
@@ -97,11 +104,19 @@ export async function caseView(db: Db, caseId: string) {
 
 export type NewCustomer = { name: string; channel: Channel; address: string };
 
-export async function openCase(
-  db: Db,
-  input: { message: string; artifacts: NewArtifact[]; fixtureId?: string; customer?: NewCustomer },
-  extractor: Extractor,
-): Promise<string> {
+export type OpenCaseInput = {
+  message: string;
+  artifacts: NewArtifact[];
+  fixtureId?: string;
+  customer?: NewCustomer;
+  /** Claim type the customer picked in the customer website. */
+  agentId?: string | null;
+  /** Where the report arrived; fixtures use "demo". */
+  channel?: Channel;
+  attachments?: MessageAttachment[];
+};
+
+export async function openCase(db: Db, input: OpenCaseInput, extractor: Extractor): Promise<string> {
   const c = await db.transaction(async (tx) => {
     // A known number or account gets the same customer row, so all their cases show up together.
     const [customer] = input.customer
@@ -117,6 +132,7 @@ export async function openCase(
         reference: `CLM-${Date.now().toString(36).toUpperCase()}-${randomBytes(2).toString("hex").toUpperCase()}`,
         replyToken: randomBytes(16).toString("hex"),
         customerId: customer?.id ?? null,
+        agentId: input.agentId ?? null,
         assignedTo: BROKER,
       })
       .returning();
@@ -124,14 +140,15 @@ export async function openCase(
     await tx.insert(messages).values({
       caseId: row!.id,
       direction: "inbound",
-      channel: "demo",
+      channel: input.channel ?? "demo",
       role: "customer",
       body: input.message,
       status: "received",
+      attachments: input.attachments ?? [],
     });
     await logEvent(tx, row!, "intake", {
       // fixtureId lets an interrupted fixture case resume with the same fixture data
-      detail: { artifacts: input.artifacts.map((a) => a.sourceId), fixtureId: input.fixtureId ?? null },
+      detail: { artifacts: input.artifacts.map((a) => a.sourceId), fixtureId: input.fixtureId ?? null, agentId: input.agentId ?? null },
     });
     return row!;
   });
@@ -186,6 +203,78 @@ export async function retryExtraction(db: Db, caseId: string, revision: number, 
   for (const { artifact, attemptId } of failedExtractions(state, history)) {
     await extractOne(db, state.case, artifact, extractor, attemptId);
   }
+}
+
+export type UploadedEvidence = { kind: ArtifactKind; mediaType: string; objectKey: string; name: string };
+
+/**
+ * A customer adds evidence after intake (photos, a corrected estimate, a document). A correction keeps the
+ * original: a new estimate version supersedes the old one, photos get their own source IDs. The revision grows,
+ * so any earlier approval is stale, then the new files are extracted and the decision recomputed.
+ */
+export async function addEvidence(
+  db: Db,
+  caseId: string,
+  input: { message: string; files: UploadedEvidence[]; channel?: Channel },
+  extractor: Extractor,
+): Promise<number> {
+  if (!input.files.length) throw new WorkflowError("invalid_upload", "Attach at least one file.");
+  const added = await db.transaction(async (tx) => {
+    const [c] = await tx.select().from(cases).where(eq(cases.id, caseId)).for("update");
+    if (!c) throw new WorkflowError("not_found", `case ${caseId} not found`);
+    if (c.status === "submitting" || c.status === "submitted") {
+      throw new WorkflowError("not_ready", "This claim was already forwarded. The broker records further correspondence.");
+    }
+    const existing = await tx.select().from(artifacts).where(eq(artifacts.caseId, caseId));
+    let photoCount = existing.filter((artifact) => artifact.kind === "photo").length;
+    let documentCount = existing.filter((artifact) => artifact.kind === "estimate").length;
+    const rows = input.files.map((file) => {
+      if (file.kind === "estimate") {
+        const prior = existing.filter((artifact) => artifact.kind === "estimate").sort((a, b) => b.version - a.version)[0];
+        return {
+          ...file,
+          sourceId: prior?.sourceId ?? `estimate-${++documentCount}`,
+          version: (prior?.version ?? 0) + 1,
+          supersedesVersion: prior?.version ?? null,
+        };
+      }
+      if (file.kind === "photo") {
+        return { ...file, sourceId: `photo-${++photoCount}`, version: 1, supersedesVersion: null };
+      }
+      return { ...file, sourceId: `document-${++documentCount}`, version: 1, supersedesVersion: null };
+    });
+    await tx.insert(artifacts).values(
+      rows.map((row) => ({
+        caseId,
+        sourceId: row.sourceId,
+        version: row.version,
+        supersedesVersion: row.supersedesVersion,
+        kind: row.kind,
+        mediaType: row.mediaType,
+        objectKey: row.objectKey,
+      })),
+    );
+    await tx.insert(messages).values({
+      caseId,
+      direction: "inbound",
+      channel: input.channel ?? "web",
+      role: "customer",
+      body: input.message.slice(0, 4000),
+      status: "received",
+      attachments: rows.map((row) => ({ sourceId: row.sourceId, version: row.version, kind: row.kind, name: row.name, mediaType: row.mediaType })),
+    });
+    const revision = c.revision + 1;
+    await tx.update(cases).set({ revision, status: "intake", updatedAt: new Date() }).where(eq(cases.id, caseId));
+    await logEvent(tx, { id: caseId, revision }, "evidence", {
+      detail: { files: rows.map((row) => `${row.sourceId}@${row.version}`), supersedes: rows.map((row) => row.supersedesVersion) },
+    });
+    return { case: { id: caseId, revision }, rows };
+  });
+  for (const row of added.rows) {
+    await extractOne(db, added.case, row, extractor);
+  }
+  await recompute(db, caseId);
+  return added.case.revision;
 }
 
 async function extractOne(

@@ -43,6 +43,13 @@
       "when": 1795610988230,
       "tag": "0005_customers_and_assignment",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795723683875,
+      "tag": "0006_first_vermin",
+      "breakpoints": true
     }
   ]
 }

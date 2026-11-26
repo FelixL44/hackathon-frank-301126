@@ -1,4 +1,4 @@
-import { Archive, ArrowUpRight, ClipboardCheck, Clock3, Inbox, Search } from "lucide-react";
+import { Archive, ArrowUpRight, ChevronDown, ClipboardCheck, Clock3, Globe2, Inbox, MessageCircle, Search, Settings } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { getDb } from "../server/db.ts";
@@ -17,7 +17,7 @@ export async function BrokerShell({
   children, queue, counts, returnTo,
 }: {
   children: ReactNode;
-  queue?: Queue;
+  queue?: Queue | "whatsapp";
   counts?: Record<Queue, number>;
   returnTo?: string;
 }) {
@@ -29,10 +29,27 @@ export async function BrokerShell({
   return (
     <div className="broker-shell">
       <aside className="broker-sidebar">
-        <Link className="workspace-brand" href="/">
-          <img src="/frank-logo.webp" alt="FRANK" width={120} height={40} />
-          <small>Broker workspace</small>
-        </Link>
+        <div className="workspace-topline">
+          <Link className="workspace-brand" href="/">
+            <img src="/frank-logo.webp" alt="FRANK" width={120} height={40} />
+            <small>Broker workspace</small>
+          </Link>
+          <details className="account-menu">
+            <summary aria-label="Account menu" title="Account">
+              <span className="workspace-avatar" aria-hidden="true">B</span>
+              <ChevronDown size={13} aria-hidden="true" />
+            </summary>
+            <div className="account-options">
+              <span className="account-identity">
+                <strong>Demo broker</strong>
+                <small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small>
+              </span>
+              <Link href="/whatsapp"><MessageCircle size={16} aria-hidden="true" /> WhatsApp inbox</Link>
+              <Link href="/admin"><Settings size={16} aria-hidden="true" /> Admin workspace</Link>
+              <Link href="/customer"><Globe2 size={16} aria-hidden="true" /> Customer website</Link>
+            </div>
+          </details>
+        </div>
         <form action="/" role="search" className="broker-search sidebar-search">
           <Search size={17} aria-hidden="true" />
           <input name="q" type="search" aria-label="Quick search all cases" placeholder="Quick search" />
@@ -44,13 +61,13 @@ export async function BrokerShell({
               {counts && <span className="nav-count">{counts[id]}</span>}
             </Link>
           ))}
+          <hr className="nav-divider" />
+          <Link href="/whatsapp" aria-current={queue === "whatsapp" ? "page" : undefined}>
+            <MessageCircle size={18} aria-hidden="true" /> <span>WhatsApp</span>
+          </Link>
         </nav>
         <div className="broker-sidebar-footer">
           <a className="workspace-guide" href="/architecture.html">Workflow guide <ArrowUpRight size={15} aria-hidden="true" /></a>
-          <div className="workspace-account">
-            <span className="workspace-avatar" aria-hidden="true">B</span>
-            <span><strong>Demo broker</strong><small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small></span>
-          </div>
         </div>
       </aside>
       <main className="broker-main">{children}</main>

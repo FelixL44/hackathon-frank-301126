@@ -4,6 +4,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  boolean,
   doublePrecision,
   foreignKey,
   integer,
@@ -31,6 +32,40 @@ const caseId = () =>
 export const CHANNELS = ["demo", "web", "whatsapp", "teams", "telegram"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
+/**
+ * A claim agent: one configurable claim type the broker offers (motor damage, home water damage, …).
+ * The admin view edits these; a case keeps the agent it was opened with. HAC-24 moves the extraction
+ * prompt and rules per agent; until then the workflow still runs the motor rules.
+ */
+export const agents = pgTable(
+  "agents",
+  {
+    id: id(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    status: text("status", { enum: ["active", "paused"] }).notNull().default("active"),
+    prompt: text("prompt").notNull().default(""),
+    requiredFields: jsonb("required_fields").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    requiredDocuments: jsonb("required_documents").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("agents_one_slug").on(t.slug)],
+).enableRLS();
+
+/** Server-side integration settings edited in the admin view. Secret values are never rendered in full. */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull().default(""),
+  isSecret: boolean("is_secret").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}).enableRLS();
+
+/** A file attached to a chat message. The file itself stays in `artifacts`; this is the display reference. */
+export type MessageAttachment = { sourceId: string; version: number; kind: ArtifactKind; name: string; mediaType: string };
+
 /** Whoever reports the damage. `address` is how the channel reaches them, e.g. a WhatsApp number. */
 export const customers = pgTable(
   "customers",
@@ -54,6 +89,7 @@ export const cases = pgTable("cases", {
   policyReference: text("policy_reference"),
   vehicleId: text("vehicle_id"),
   customerId: uuid("customer_id").references(() => customers.id), // null for cases opened before HAC-35
+  agentId: uuid("agent_id").references(() => agents.id), // claim type the customer chose; null on old cases
   assignedTo: text("assigned_to"), // broker identity; null = unassigned
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -130,6 +166,7 @@ export const messages = pgTable(
     externalEventId: text("external_event_id"), // inbound: provider event ID, dedupe key
     requestKey: text("request_key").unique(), // outbound: idempotency key for the send
     inReplyTo: uuid("in_reply_to"),
+    attachments: jsonb("attachments").$type<MessageAttachment[]>().notNull().default(sql`'[]'::jsonb`),
     status: text("status", { enum: ["received", "pending", "sent", "failed", "draft", "confirmed", "discarded"] }).notNull(),
     attempts: integer("attempts").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
