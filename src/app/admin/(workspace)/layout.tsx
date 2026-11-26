@@ -1,4 +1,4 @@
-import { ChevronDown, ClipboardCheck, Globe2, LogOut, MessageCircle, ShieldCheck } from "lucide-react";
+import { ChevronsUpDown, ClipboardCheck, Globe2, LogOut, MessageCircle, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireAdmin } from "../../../server/auth.ts";
@@ -10,31 +10,26 @@ export default async function AdminWorkspaceLayout({ children }: { children: Rea
   return (
     <div className="broker-shell admin-shell">
       <aside className="broker-sidebar admin-sidebar">
-        <div className="workspace-topline">
-          <Link className="workspace-brand" href="/admin">
-            <img src="/frank-logo.webp" alt="FRANK" width={120} height={40} />
-            <small>Admin workspace</small>
-          </Link>
-          <details className="account-menu">
-            <summary aria-label="Account menu" title="Account">
-              <span className="workspace-avatar" aria-hidden="true">A</span>
-              <ChevronDown size={13} aria-hidden="true" />
-            </summary>
-            <div className="account-options">
-              <span className="account-identity">
-                <strong>Demo admin</strong>
-                <small>Agents &amp; integrations</small>
-              </span>
-              <Link href="/"><ClipboardCheck size={16} aria-hidden="true" /> Broker workspace</Link>
-              <Link href="/whatsapp"><MessageCircle size={16} aria-hidden="true" /> WhatsApp inbox</Link>
-              <Link href="/customer"><Globe2 size={16} aria-hidden="true" /> Customer website</Link>
-              <hr className="nav-divider" />
-              <form action={signOut} className="admin-signout">
-                <button type="submit"><LogOut size={16} aria-hidden="true" /> Sign out</button>
-              </form>
-            </div>
-          </details>
-        </div>
+        <details className="account-menu account-menu-wide">
+          <summary className="workspace-account" aria-label="Account menu" title="Account">
+            <span className="workspace-avatar" aria-hidden="true">A</span>
+            <span><strong>Demo admin</strong><small>Admin workspace</small></span>
+            <ChevronsUpDown size={16} aria-hidden="true" />
+          </summary>
+          <div className="account-options">
+            <span className="account-identity">
+              <strong>Demo admin</strong>
+              <small>Agents &amp; integrations</small>
+            </span>
+            <Link href="/"><ClipboardCheck size={16} aria-hidden="true" /> Broker workspace</Link>
+            <Link href="/whatsapp"><MessageCircle size={16} aria-hidden="true" /> WhatsApp inbox</Link>
+            <Link href="/customer"><Globe2 size={16} aria-hidden="true" /> Customer website</Link>
+            <hr className="nav-divider" />
+            <form action={signOut} className="admin-signout">
+              <button type="submit"><LogOut size={16} aria-hidden="true" /> Sign out</button>
+            </form>
+          </div>
+        </details>
 
         <AdminNav />
 

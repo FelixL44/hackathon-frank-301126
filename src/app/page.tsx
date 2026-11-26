@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ArrowLeft, ArrowRight, ArrowUpRight, ChevronDown, FileText, Filter, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowLeft, ArrowRight, ChevronDown, FileText, Plus, Search } from "lucide-react";
 import { and, desc, eq, exists, like, sql } from "drizzle-orm";
 import Link from "next/link";
 import { FIXTURE_CASES } from "../../fixtures/cases.ts";
@@ -70,6 +70,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
       ...(active !== "all" && { queue: active }), ...(query && { q: query }),
       ...(selected && { status: selected }), ...(oldest && { sort: "oldest" }), ...params,
     });
+    for (const [key, value] of [...values]) if (!value) values.delete(key);
     return values.size ? `/?${values}` : "/";
   }
 
@@ -81,83 +82,59 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
   return (
     <BrokerShell queue={active} counts={counts}>
       <header className="row broker-heading">
-        <div>
-          <h1>{active === "all" ? "Claims workspace" : queues.find((item) => item.id === active)?.label}</h1>
+        <h1>{active === "all" ? "Claims workspace" : queues.find((item) => item.id === active)?.label}</h1>
+        <div className="broker-heading-actions">
+          {next && <Link className="broker-button" href={caseHref(next.id, { from })}>Open next case <ArrowRight size={16} aria-hidden="true" /></Link>}
+          <details className="demo-menu">
+            <summary className="broker-button primary-action"><Plus size={18} aria-hidden="true" /> New demo case</summary>
+            <form action={launchFixture} className="demo-options">
+              {Object.entries(FIXTURE_CASES).map(([id, fixture]) => (
+                <button type="submit" className="secondary" key={id} name="fixtureId" value={id}>{fixture.title}</button>
+              ))}
+            </form>
+          </details>
         </div>
-        <details className="demo-menu">
-          <summary className="broker-button primary-action"><Plus size={18} aria-hidden="true" /> New demo case <ChevronDown size={15} aria-hidden="true" /></summary>
-          <form action={launchFixture} className="demo-options">
-            {Object.entries(FIXTURE_CASES).map(([id, fixture]) => (
-              <button type="submit" className="secondary" key={id} name="fixtureId" value={id}>{fixture.title}</button>
-            ))}
-          </form>
-        </details>
       </header>
-
-      {active === "all" && (
-        <section className="queue-summary" aria-label="Case overview">
-          <div className="card queue-feature">
-            <div>
-              <span className="queue-feature-label">Needs my action</span>
-              <p><strong>{counts.review}</strong> {counts.review === 1 ? "claim to review" : "claims to review"}</p>
-            </div>
-            {next ? (
-              <Link className="broker-button" href={caseHref(next.id, { from })}>
-                Open next case <ArrowRight size={16} aria-hidden="true" />
-              </Link>
-            ) : <span className="queue-feature-clear">You’re all caught up</span>}
-          </div>
-          {queues.filter(({ id }) => id === "waiting" || id === "submitted").map(({ id, label, icon: Icon }) => (
-            <Link className="card queue-card" key={id} href={`/?queue=${id}`}>
-              <span className="queue-card-top"><span className="icon-tile"><Icon size={18} aria-hidden="true" /></span><ArrowUpRight size={16} aria-hidden="true" /></span>
-              <strong>{counts[id]}</strong>
-              <span>{label}</span>
-            </Link>
-          ))}
-        </section>
-      )}
 
       <section className="card table-panel" aria-labelledby="queue-heading">
         <header className="table-toolbar">
-          <div>
-            <h2 id="queue-heading">Assigned cases</h2>
-            <p className="muted">{matching.length} {matching.length === 1 ? "case" : "cases"}</p>
+          <div className="table-total">
+            <span id="queue-heading">Total results</span>
+            <strong>{matching.length} {matching.length === 1 ? "case" : "cases"}</strong>
           </div>
-          <form action="/" className="case-filters">
-            {active !== "all" && <input type="hidden" name="queue" value={active} />}
-            {oldest && <input type="hidden" name="sort" value="oldest" />}
-            <label className="case-filter"><Filter size={16} aria-hidden="true" />
-              <select name="status" aria-label="Case status" defaultValue={selected ?? ""}>
-                <option value="">All statuses</option>
+          <div className="case-filters">
+            <details className="pill-menu">
+              <summary className="broker-button">{selected ? STATUS[selected].label : "All statuses"} <ChevronDown size={16} aria-hidden="true" /></summary>
+              <nav className="pill-options" aria-label="Filter by status">
+                <Link href={href({ status: "", page: "" })} aria-current={!selected ? "true" : undefined}>All statuses</Link>
                 {CaseStatus.options.filter((value) => inQueue(value, active)).map((value) => (
-                  <option value={value} key={value}>{STATUS[value].label}</option>
+                  <Link key={value} href={href({ status: value, page: "" })} aria-current={selected === value ? "true" : undefined}>{STATUS[value].label}</Link>
                 ))}
-              </select><ChevronDown size={14} aria-hidden="true" />
-            </label>
-            <label className="broker-search"><Search size={17} aria-hidden="true" />
-              <input name="q" type="search" maxLength={160} aria-label="Search assigned cases" placeholder="Search cases" defaultValue={query} />
-            </label>
-            <button type="submit" className="secondary broker-button">Apply</button>
-            <Link className="broker-button compact-sort" href={href({ sort: oldest ? "" : "oldest" })} aria-label={oldest ? "Sort newest first" : "Sort oldest first"}>
-              {oldest ? <ArrowUp size={15} aria-hidden="true" /> : <ArrowDown size={15} aria-hidden="true" />} Updated
-            </Link>
+              </nav>
+            </details>
+            <form action="/" role="search" className="broker-search">
+              {active !== "all" && <input type="hidden" name="queue" value={active} />}
+              {selected && <input type="hidden" name="status" value={selected} />}
+              {oldest && <input type="hidden" name="sort" value="oldest" />}
+              <Search size={18} aria-hidden="true" />
+              <input name="q" type="search" maxLength={160} aria-label="Search assigned cases" placeholder="Search" defaultValue={query} />
+            </form>
             {(selected || query) && <Link href={active === "all" ? "/" : `/?queue=${active}`} className="filter-reset">Clear</Link>}
-          </form>
+          </div>
         </header>
         <div className="scroll">
           <table className="case-table">
             <thead>
               <tr>
-                <th scope="col">Case / customer report</th>
-                <th scope="col" className="case-status-column">Status</th>
+                <th scope="col">Case</th>
                 <th scope="col">Next action</th>
-                <th scope="col" className="case-policy-column">Policy / vehicle</th>
+                <th scope="col" className="case-status-column">Status</th>
                 <th scope="col" className="case-updated-column" aria-sort={oldest ? "ascending" : "descending"}>
                   <Link href={href({ sort: oldest ? "" : "oldest" })}>
-                    Updated {oldest ? <ArrowUp size={13} aria-hidden="true" /> : <ArrowDown size={13} aria-hidden="true" />}
+                    Last updated {oldest ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}
                   </Link>
                 </th>
-                <th scope="col" aria-label="Open case" />
+                <th scope="col" className="case-policy-column">Policy</th>
               </tr>
             </thead>
             <tbody>
@@ -166,17 +143,16 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
                 return (
                   <tr key={c.id}>
                     <td><div className="case-identity">
-                      <span className="icon-tile"><FileText size={17} aria-hidden="true" /></span>
+                      <span className="case-avatar" aria-hidden="true">{c.reference.replace(/\W/g, "").slice(-2)}</span>
                       <span><Link className="case-reference" href={caseHref(c.id, { from })}>{c.reference}</Link>
                         {c.message && <small title={c.message}>{c.message}</small>}
                         <span className={`badge compact-case-status ${c.status}`}>{STATUS[c.status].label}</span>
                       </span>
                     </div></td>
+                    <td><span className={`case-actor actor-${actor}`} title={`${actor} acts next`}>{nextCaseAction(c.status, c.contacted)}</span></td>
                     <td className="case-status-column"><span className={`badge ${c.status}`}>{STATUS[c.status].label}</span></td>
-                    <td><span className={`case-actor ${actor === "Broker" ? "actor-broker" : ""}`}>{nextCaseAction(c.status, c.contacted)}</span>{actor !== "Complete" && <small className="actor-label">{actor}</small>}</td>
-                    <td className="case-policy-column">{c.policy ?? "Unknown"}{c.vehicle && <small>{c.vehicle}</small>}</td>
                     <td className="case-updated-column"><time dateTime={c.updatedAt.toISOString()}>{date.format(c.updatedAt)}</time></td>
-                    <td><Link className="case-open" href={caseHref(c.id, { from })} aria-label={`Open ${c.reference}`}><ArrowUpRight size={17} /></Link></td>
+                    <td className="case-policy-column"><span className="case-chip">{c.policy ?? "Unknown"}</span>{c.vehicle && <small>{c.vehicle}</small>}</td>
                   </tr>
                 );
               })}
@@ -191,12 +167,18 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<Se
           )}
         </div>
         <footer className="table-footer">
-          <span className="muted">{matching.length ? `Showing ${start + 1}–${start + results.length} of ${matching.length}` : "0 results"}</span>
-          {pages > 1 && <nav className="case-pagination" aria-label="Case list pages">
-            {pageNumber > 1 && <Link className="broker-button" href={href({ page: String(pageNumber - 1) })}><ArrowLeft size={15} /> Previous</Link>}
-            <span className="muted">Page {pageNumber} of {pages}</span>
-            {pageNumber < pages && <Link className="broker-button" href={href({ page: String(pageNumber + 1) })}>Next <ArrowRight size={15} /></Link>}
-          </nav>}
+          <span>{pageNumber > 1
+            ? <Link className="broker-button" href={href({ page: String(pageNumber - 1) })}><ArrowLeft size={16} aria-hidden="true" /> Previous</Link>
+            : <span className="broker-button" aria-disabled="true"><ArrowLeft size={16} aria-hidden="true" /> Previous</span>}</span>
+          <nav className="case-pagination" aria-label="Case list pages">
+            {/* shortcut: lists every page number, fine for demo volumes; add an ellipsis past ~10 pages */}
+            {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+              <Link key={n} className="page-number" href={href({ page: n > 1 ? String(n) : "" })} aria-current={n === pageNumber ? "page" : undefined}>{n}</Link>
+            ))}
+          </nav>
+          <span>{pageNumber < pages
+            ? <Link className="broker-button" href={href({ page: String(pageNumber + 1) })}>Next <ArrowRight size={16} aria-hidden="true" /></Link>
+            : <span className="broker-button" aria-disabled="true">Next <ArrowRight size={16} aria-hidden="true" /></span>}</span>
         </footer>
       </section>
     </BrokerShell>

@@ -1,6 +1,8 @@
-import { Archive, ArrowUpRight, ChevronDown, ClipboardCheck, Clock3, Globe2, Inbox, MessageCircle, Search, Settings } from "lucide-react";
+import { Archive, BookOpen, ChevronsUpDown, ClipboardCheck, Clock3, Globe2, Inbox, MessageCircle, Search, Settings } from "lucide-react";
+import { and, count, eq } from "drizzle-orm";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { ViewTransition, type ReactNode } from "react";
+import { messages } from "../db/schema.ts";
 import { getDb } from "../server/db.ts";
 import { extractionStatus } from "../server/extractor.ts";
 
@@ -12,65 +14,78 @@ export const queues = [
 ] as const;
 
 export type Queue = (typeof queues)[number]["id"];
+type Section = Queue | "whatsapp";
+
+/** Active background of a nav item or tab. The shared name makes React slide it to the new item on navigation. */
+export function ActivePill({ name, className }: { name: string; className: string }) {
+  return <ViewTransition name={name} share="pill-move" default="none"><span className={className} aria-hidden="true" /></ViewTransition>;
+}
 
 export async function BrokerShell({
-  children, queue, counts, returnTo,
+  children, queue, counts, returnTo, section,
 }: {
   children: ReactNode;
   queue?: Queue | "whatsapp";
   counts?: Record<Queue, number>;
   returnTo?: string;
+  section?: "whatsapp";
 }) {
   const detail = returnTo !== undefined;
   const originQueue = detail ? new URLSearchParams(returnTo.slice(2)).get("queue") : null;
-  const active = queue ?? queues.find(({ id }) => id === originQueue)?.id ?? "all";
-  const mode = await extractionStatus(await getDb());
+  const active: Section = section ?? queue ?? queues.find(({ id }) => id === originQueue)?.id ?? "all";
+  const db = await getDb();
+  const mode = await extractionStatus(db);
+  const [drafts] = await db.select({ n: count() }).from(messages)
+    .where(and(eq(messages.status, "draft"), eq(messages.direction, "outbound")));
+  const current = (id: Section) => id === active ? (detail ? "location" : "page") : undefined;
 
   return (
     <div className="broker-shell">
       <aside className="broker-sidebar">
-        <div className="workspace-topline">
-          <Link className="workspace-brand" href="/">
-            <img src="/frank-logo.webp" alt="FRANK" width={120} height={40} />
-            <small>Broker workspace</small>
-          </Link>
-          <details className="account-menu">
-            <summary aria-label="Account menu" title="Account">
-              <span className="workspace-avatar" aria-hidden="true">B</span>
-              <ChevronDown size={13} aria-hidden="true" />
-            </summary>
-            <div className="account-options">
-              <span className="account-identity">
-                <strong>Demo broker</strong>
-                <small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small>
-              </span>
-              <Link href="/whatsapp"><MessageCircle size={16} aria-hidden="true" /> WhatsApp inbox</Link>
-              <Link href="/admin"><Settings size={16} aria-hidden="true" /> Admin workspace</Link>
-              <Link href="/customer"><Globe2 size={16} aria-hidden="true" /> Customer website</Link>
-            </div>
-          </details>
-        </div>
-        <form action="/" role="search" className="broker-search sidebar-search">
-          <Search size={17} aria-hidden="true" />
+        <details className="account-menu account-menu-wide">
+          <summary className="workspace-account" aria-label="Account menu" title="Account">
+            <span className="workspace-avatar" aria-hidden="true">B</span>
+            <span><strong>Demo broker</strong><small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small></span>
+            <ChevronsUpDown size={16} aria-hidden="true" />
+          </summary>
+          <div className="account-options">
+            <span className="account-identity">
+              <strong>Demo broker</strong>
+              <small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small>
+            </span>
+            <Link href="/whatsapp"><MessageCircle size={16} aria-hidden="true" /> WhatsApp inbox</Link>
+            <Link href="/admin"><Settings size={16} aria-hidden="true" /> Admin workspace</Link>
+            <Link href="/customer"><Globe2 size={16} aria-hidden="true" /> Customer website</Link>
+          </div>
+        </details>
+        <form action="/" role="search" className="broker-search">
+          <Search size={18} aria-hidden="true" />
           <input name="q" type="search" aria-label="Quick search all cases" placeholder="Quick search" />
         </form>
-        <nav aria-label="Case queues" className="broker-nav">
+        <nav aria-label="Workspace" className="broker-nav">
           {queues.map(({ id, label, icon: Icon }) => (
-            <Link key={id} href={id === "all" ? "/" : `/?queue=${id}`} aria-current={id === active ? (detail ? "location" : "page") : undefined}>
-              <Icon size={18} aria-hidden="true" /> <span>{label}</span>
+            <Link key={id} href={id === "all" ? "/" : `/?queue=${id}`} aria-current={current(id)}>
+              {id === active && <ActivePill name="nav-pill" className="nav-pill" />}
+              <Icon size={19} aria-hidden="true" /> <span>{label}</span>
               {counts && <span className="nav-count">{counts[id]}</span>}
             </Link>
           ))}
           <hr className="nav-divider" />
-          <Link href="/whatsapp" aria-current={queue === "whatsapp" ? "page" : undefined}>
-            <MessageCircle size={18} aria-hidden="true" /> <span>WhatsApp</span>
+          <Link href="/whatsapp" aria-current={current("whatsapp")}>
+            {active === "whatsapp" && <ActivePill name="nav-pill" className="nav-pill" />}
+            <MessageCircle size={19} aria-hidden="true" /> <span>WhatsApp</span>
+            {drafts!.n > 0 && <span className="nav-count" title="Drafts ready to send">{drafts!.n}</span>}
           </Link>
         </nav>
         <div className="broker-sidebar-footer">
-          <a className="workspace-guide" href="/architecture.html">Workflow guide <ArrowUpRight size={15} aria-hidden="true" /></a>
+          <a className="workspace-guide" href="/architecture.html"><BookOpen size={19} aria-hidden="true" /> Workflow guide</a>
         </div>
       </aside>
-      <main className="broker-main">{children}</main>
+      <main className="broker-main">
+        <ViewTransition default="page-swap">
+          <div>{children}</div>
+        </ViewTransition>
+      </main>
     </div>
   );
 }
