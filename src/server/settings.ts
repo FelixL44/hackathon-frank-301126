@@ -142,11 +142,14 @@ export async function writeSetting(db: Db, key: string, value: string, isSecret:
     .onConflictDoUpdate({ target: settings.key, set: { value, isSecret, updatedAt: new Date() } });
 }
 
-/** Empty secret input keeps the stored value; the `clear:<key>` checkbox removes it. */
+/** Empty secret input keeps the stored value; the `clear:<key>` checkbox removes it.
+ *  Fields absent from this form (other integration groups) are left untouched. */
 export async function saveIntegrationFields(db: Db, form: FormData) {
   for (const field of ALL_FIELDS) {
+    const clear = form.has(`clear:${field.key}`);
+    if (!form.has(field.key) && !clear) continue;
     if (field.kind === "secret") {
-      if (form.get(`clear:${field.key}`) === "on") {
+      if (clear) {
         await writeSetting(db, field.key, "", true);
         continue;
       }

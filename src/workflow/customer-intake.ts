@@ -64,8 +64,10 @@ export async function createCustomerCase(
   const stored = await store(input.files);
   let photos = 0;
   let documents = 0;
+  let notes = 0;
   const artifacts = stored.map((file) => ({
-    sourceId: file.kind === "photo" ? `photo-${++photos}` : `estimate-${++documents}`,
+    sourceId:
+      file.kind === "photo" ? `photo-${++photos}` : file.kind === "message" ? `message-${++notes}` : `estimate-${++documents}`,
     kind: file.kind,
     mediaType: file.mediaType,
     objectKey: file.objectKey,

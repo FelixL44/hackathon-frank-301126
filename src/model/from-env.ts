@@ -15,7 +15,7 @@ export function providerFromEnv(env: Record<string, string | undefined> = proces
 function select(env: Record<string, string | undefined>): ModelProvider | null {
   const provider = env.MODEL_PROVIDER?.trim();
   if (!provider) return null;
-  if (provider === "anthropic") return anthropicProvider(env.MODEL_ID || DEFAULT_ANTHROPIC_MODEL);
+  if (provider === "anthropic") return anthropicProvider(env.MODEL_ID || DEFAULT_ANTHROPIC_MODEL, env.ANTHROPIC_API_KEY);
   if (provider === "openai" || provider === "openai-compatible") {
     if (!env.MODEL_ID) throw new Error(`MODEL_ID is required for MODEL_PROVIDER=${provider}`);
     if (provider === "openai-compatible" && !env.MODEL_BASE_URL) {

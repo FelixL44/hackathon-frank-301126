@@ -15,7 +15,13 @@ type Env = Record<string, string | undefined>;
  */
 export async function extractorFor(db: Db, fixtureId: string, env: Env = process.env): Promise<Extractor> {
   const config = await configFromSettings(db, env);
-  const provider = providerFromEnv(config);
+  let provider: ReturnType<typeof providerFromEnv>;
+  try {
+    provider = providerFromEnv(config);
+  } catch {
+    // A half-filled admin form (provider without key) must not take intake down: fall back like fixture mode.
+    return { ...fixtureExtractor(fixtureId), name: "fixture data (model misconfigured)" };
+  }
   if (!provider) return fixtureExtractor(fixtureId);
   if ((await spentTodayEur(db)) >= dailyBudgetEur(config)) {
     return { ...fixtureExtractor(fixtureId), name: `fixture:${fixtureId} (daily model budget reached)` };

@@ -6,7 +6,7 @@ A broker-facing app for a Portuguese insurance broker. Motor damage is the main 
 
 The agent checks whether the **case** is complete and consistent. It does not score customer credibility, decide on fraud, liability or coverage, or calculate payouts.
 
-> **Status (25 Nov):** a seeded case runs from intake through model extraction (Claude or OpenAI, fixture fallback), comparison, broker review and approval to a simulated portal receipt, in the FRANK broker UI. Not built yet: channels (WhatsApp), categories, customer and admin views, portal retries, evals. Commands marked *(planned)* do not work yet.
+> **Status (26 Nov):** the broker workspace runs from intake through extraction, comparison and approval to a portal receipt, now with a WhatsApp-style conversation inbox. A customer website (guided intake, photo/PDF uploads, chat) and an admin workspace (claim agents, model keys, WhatsApp/Telegram settings) sit beside it and share the same database. Not built yet: real channel adapters (WhatsApp/Teams/Telegram), category-specific extraction rules (HAC-24), the eval suite, portal retries and deployment.
 
 ## Team plan
 
@@ -151,11 +151,13 @@ Each file's observations, findings and `extract` event are written in one transa
   | Table | Holds | Why it exists |
   | --- | --- | --- |
   | `customers` | Name, channel and address (e.g. WhatsApp number) of whoever reports damage | An inbound message finds its customer; the customer view lists their own cases |
-  | `cases` | One claim: reference, revision, status, customer, assigned broker | The unit the broker works on; the revision ties approvals to the evidence they saw |
+  | `agents` | Claim type the broker offers: name, prompt, required fields and documents, active/paused | The admin view edits them; a case keeps the agent it was opened with |
+  | `settings` | Integration values from the admin view (model, WhatsApp, Telegram); secrets stay server-side | Database values win over env vars, so a key can be pasted without a redeploy |
+  | `cases` | One claim: reference, revision, status, customer, agent, assigned broker | The unit the broker works on; the revision ties approvals to the evidence they saw |
   | `artifacts` | Every version of every evidence file (message, photo, estimate) | Corrections add a version and never overwrite the original |
   | `observations` | Each value the agent read, with source, version and quote or photo description | Every finding links back to the exact place in the source |
   | `findings` | Conflicts and gaps, and how the broker resolved them | Drives the next action and the broker's review |
-  | `messages` | Inbound messages and outbound drafts/sends | Dedupes replayed webhooks; nothing goes out without broker approval |
+  | `messages` | Inbound messages, outbound drafts/sends and chat attachments | Dedupes replayed webhooks; nothing goes out without broker approval |
   | `submissions` | The broker's approval of one revision plus the portal send state | One row per revision: a double click or retry never files twice |
   | `portal_receipts` | Receipts of the **simulated** insurer portal | Stands in for the foreign system; returns the same receipt on repeat calls |
   | `events` | Timeline: every step, tool, model, latency, error and cost | Audit trail, retry trace and the daily model budget |
@@ -166,6 +168,15 @@ Each file's observations, findings and `extract` event are written in one transa
 
 The demo inbox and the insurer portal are **simulated** and labeled as simulated in the UI. The portal stores a receipt per idempotency key and returns the original receipt when the same call is repeated.
 
+### Views
+
+The **account menu at the top left** switches between the three workspaces.
+
+- **Broker (`/`)** — assigned cases, agent assessment next to the sources, revisions, approval and the simulated portal receipt.
+- **WhatsApp inbox (`/whatsapp`)** — one WhatsApp-style thread per case. Customer website messages and broker replies land in the same conversation. Until the WhatsApp Business credentials are active, nothing leaves the web inbox; the real adapter is HAC-27.
+- **Customer website (`/customer`)** — a clean claims portal. The customer enters name and phone/email (or uses one of the seeded demo customers), picks a claim agent, describes the incident and uploads photos or PDFs. The case room shows status, the broker's open questions, the shared conversation and an upload box. New evidence creates a revision and starts a fresh review. The session is a signed demo cookie, not real authentication.
+- **Admin workspace (`/admin`)** — password-protected (`ADMIN_PASSWORD`, demo default `frank-admin`). Agents can be created, edited and paused; model keys, the model choice, WhatsApp Business credentials and the Telegram fallback are stored server-side (secrets masked) and override the environment on the next case.
+
 ## UI design
 
 All views follow the FRANK look described in [`frank-design-tokens.md`](frank-design-tokens.md): grey and white surfaces, teal (`#00888F`) as the only brand color, navy in gradients, Roboto and Plus Jakarta Sans. The tokens live as plain CSS variables in `src/app/globals.css`. New pages and components reuse these variables and classes instead of their own colors or styles.
@@ -174,15 +185,19 @@ All views follow the FRANK look described in [`frank-design-tokens.md`](frank-de
 
 ```
 src/
-  app/                         Next.js pages and server actions (inbox, case view, source viewer, portal receipt)
+  app/                         Next.js pages and server actions
+    page.tsx, cases/           broker workspace: queues, case review, sources, portal receipt
+    whatsapp/                  WhatsApp-style conversation inbox (broker)
+    customer/                  customer website: landing, guided intake, case room, chat
+    admin/                     password-protected admin: agents, model and channel settings
   domain/                      case schema, decision table, filing preparation (pure, no I/O)
-  workflow/                    orchestration: open case, recompute, approve, dispatch
+  workflow/                    orchestration: open case, evidence, recompute, approve, dispatch, chat
   portal/                      simulated insurer portal (idempotent receipts)
   db/                          Drizzle schema, client, migrate and seed scripts
   extraction/                  prompt, grounding check, model-backed extractor with retry budget
   model/                       provider port + Anthropic and OpenAI(-compatible) adapters, smoke script
-  storage/                     evidence file access
-  server/                      per-process database handle and extractor selection for Next.js
+  storage/                     evidence file access (local driver, uploads under `.data/objects/`)
+  server/                      db handle, extractor selection, admin auth, customer session, settings
   app/api/channels/[channel]/  (planned, HAC-11) inbound webhook endpoint
 drizzle/                       SQL migrations
 fixtures/                      fixture manifest, fixture-backed observations, synthetic evidence files (files/)
@@ -201,6 +216,11 @@ evals/                         (planned, HAC-14) live model evaluation runner an
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | for that provider | Server-side only |
 | `MODEL_DAILY_BUDGET_EUR` | no (default `1`) | Model spend per Lisbon day before the app falls back to fixture data |
 | `APP_LANGUAGE` | no (default `en`) | Language of drafted customer messages: `en` or `pt` |
+| `ADMIN_PASSWORD` | no (demo default `frank-admin`) | Password for the admin workspace |
+| `SESSION_SECRET` | no (derived) | Signs the demo customer session cookie |
+| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN` | for WhatsApp | Meta Cloud API credentials; also editable in the admin view |
+| `WHATSAPP_NUMBER`, `WHATSAPP_BUSINESS_NAME` | no | Public number and display name shown in the admin/WhatsApp views |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_NAME` | for Telegram | Fallback channel credentials |
 | `MODEL_PRICE_USD_PER_MTOK` | for `openai` | `<input>,<output>` USD per million tokens from the provider's price list; overrides built-in prices |
 | `STORAGE_DRIVER`, `S3_*` | (planned, deployment) | S3-compatible private bucket |
 | `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | for Slack | Broker notifications |
