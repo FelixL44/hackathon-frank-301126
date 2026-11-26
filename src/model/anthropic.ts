@@ -6,8 +6,9 @@ import { base64, ModelRefusal, type ModelAnswer, type ModelProvider, type ModelR
 
 type ImageMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
-export function anthropicProvider(model: string): ModelProvider {
-  const client = new Anthropic(); // ANTHROPIC_API_KEY or an `ant auth login` profile
+export function anthropicProvider(model: string, apiKey?: string): ModelProvider {
+  // An explicit key comes from the admin settings; otherwise ANTHROPIC_API_KEY or an `ant auth login` profile.
+  const client = new Anthropic(apiKey ? { apiKey } : undefined);
 
   return {
     id: `anthropic:${model}`,

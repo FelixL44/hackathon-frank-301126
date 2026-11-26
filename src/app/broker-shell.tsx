@@ -1,4 +1,4 @@
-import { Archive, BookOpen, ChevronsUpDown, ClipboardCheck, Clock3, Inbox, MessageCircle, Search } from "lucide-react";
+import { Archive, BookOpen, ChevronsUpDown, ClipboardCheck, Clock3, Globe2, Inbox, MessageCircle, Search, Settings } from "lucide-react";
 import { and, count, eq } from "drizzle-orm";
 import Link from "next/link";
 import { ViewTransition, type ReactNode } from "react";
@@ -25,7 +25,7 @@ export async function BrokerShell({
   children, queue, counts, returnTo, section,
 }: {
   children: ReactNode;
-  queue?: Queue;
+  queue?: Queue | "whatsapp";
   counts?: Record<Queue, number>;
   returnTo?: string;
   section?: "whatsapp";
@@ -42,11 +42,22 @@ export async function BrokerShell({
   return (
     <div className="broker-shell">
       <aside className="broker-sidebar">
-        <div className="workspace-account">
-          <span className="workspace-avatar" aria-hidden="true">B</span>
-          <span><strong>Demo broker</strong><small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small></span>
-          <ChevronsUpDown size={16} aria-hidden="true" />
-        </div>
+        <details className="account-menu account-menu-wide">
+          <summary className="workspace-account" aria-label="Account menu" title="Account">
+            <span className="workspace-avatar" aria-hidden="true">B</span>
+            <span><strong>Demo broker</strong><small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small></span>
+            <ChevronsUpDown size={16} aria-hidden="true" />
+          </summary>
+          <div className="account-options">
+            <span className="account-identity">
+              <strong>Demo broker</strong>
+              <small title={mode}>{mode.startsWith("fixture data") ? "Fixture extraction" : mode}</small>
+            </span>
+            <Link href="/whatsapp"><MessageCircle size={16} aria-hidden="true" /> WhatsApp inbox</Link>
+            <Link href="/admin"><Settings size={16} aria-hidden="true" /> Admin workspace</Link>
+            <Link href="/customer"><Globe2 size={16} aria-hidden="true" /> Customer website</Link>
+          </div>
+        </details>
         <form action="/" role="search" className="broker-search">
           <Search size={18} aria-hidden="true" />
           <input name="q" type="search" aria-label="Quick search all cases" placeholder="Quick search" />

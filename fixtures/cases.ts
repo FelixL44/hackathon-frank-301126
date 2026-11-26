@@ -124,6 +124,8 @@ export const FIXTURE_CASES: Record<string, FixtureCase> = {
 };
 
 export const fixtureExtractor = (fixtureId: string): Extractor => ({
-  name: `fixture:${fixtureId}`,
-  extract: async (artifact) => ({ observations: FIXTURE_CASES[fixtureId]!.observations[artifact.sourceId] ?? [], attempts: 1 }),
+  name: `fixture:${fixtureId || "none"}`,
+  // A customer-created case has no fixture data: return no observations, so the case routes to the broker
+  // with missing-information findings instead of crashing the intake request.
+  extract: async (artifact) => ({ observations: FIXTURE_CASES[fixtureId]?.observations[artifact.sourceId] ?? [], attempts: 1 }),
 });
